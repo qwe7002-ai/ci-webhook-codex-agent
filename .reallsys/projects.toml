@@ -1,0 +1,14 @@
+# GitHub -> 內網 GitLab 專案映射設定。
+# find-project.py 讀這個檔,把一個 GitHub repo 解析成內網 GitLab 上的路徑/網址。
+
+# 預設規則:保持 <owner>/<repo> 不變,只把 host 換成這個 GitLab。
+# 例:github.com/telegram-sms/telegram-sms -> git.reall.us/telegram-sms/telegram-sms
+default_host = "https://git.reall.us"
+
+# 個別覆寫(選填):當某專案的內網 host 或路徑與預設規則「不同」時,才列在這裡。
+#   github = "<owner>/<repo>"      要對應的 GitHub 專案
+#   gitlab = "https://.../group/proj"  完整的內網 GitLab 網址
+# 符合預設規則的專案不必列(下面這筆只是範例,列出來當已知對照)。
+[[projects]]
+github = "telegram-sms/telegram-sms"
+gitlab = "https://git.reall.us/telegram-sms/telegram-sms"
