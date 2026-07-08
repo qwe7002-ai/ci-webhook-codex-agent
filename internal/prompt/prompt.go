@@ -81,7 +81,8 @@ var templates = map[string]*template.Template{
 const triageTmpl = `Run the triage_issue playbook from AGENTS.md for the GitHub event below.
 
 ## Parameters
-- GitLab issue project (<PROJECT>): {{.GitLabProject}}
+- Resolve <PROJECT> from projects.toml for the source repo (see playbook).
+- issue project fallback if projects.toml is unreadable: {{.GitLabProject}}
 {{- if .IsGitHubIssue}}
 - Source is a GitHub issue: after filing, reply on it and report GITHUB_COMMENT (see playbook).
 {{- end}}

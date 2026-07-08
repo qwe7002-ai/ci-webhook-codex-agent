@@ -31,8 +31,12 @@ func TestRender_Triage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "triage_issue") || !strings.Contains(out, "team/incidents") {
-		t.Fatalf("triage prompt missing expected content:\n%s", out)
+	// Names the playbook, resolves <PROJECT> from projects.toml, and keeps the
+	// configured project as the fallback.
+	for _, want := range []string{"triage_issue", "projects.toml", "team/incidents"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("triage prompt missing %q:\n%s", want, out)
+		}
 	}
 	// A CI event has no GitHub issue, so no reply-back parameter.
 	if strings.Contains(out, "GITHUB_COMMENT") {
