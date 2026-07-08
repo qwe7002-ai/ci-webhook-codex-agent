@@ -11,8 +11,11 @@ server:
   path: "/webhook"     # GitHub webhook target path
 
 github:
-  # Shared secret configured on the GitHub webhook (Settings -> Webhooks).
-  # Used to verify X-Hub-Signature-256. REQUIRED.
+  # Shared secret used to verify X-Hub-Signature-256. Optional: if empty (the
+  # ${GITHUB_WEBHOOK_SECRET} env var is unset), the agent generates one on first
+  # run and persists it at <codex.workdir>/.webhook-secret, reusing it after.
+  # `server -setup-webhook -repo <owner/repo> -webhook-url <url>` registers the
+  # GitHub webhook (via gh) with that same secret, so you never manage it by hand.
   webhook_secret: "${GITHUB_WEBHOOK_SECRET}"
 
   # Which events to act on. The key is the GitHub event name (X-GitHub-Event).

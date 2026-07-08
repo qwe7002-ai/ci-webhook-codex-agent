@@ -98,8 +98,9 @@ issue 內文會標註「由自動化 triage agent 建立，評判僅供參考，
 ## 專案結構
 
 ```
-cmd/server/main.go        進入點:載入設定、啟動 worker pool 與 HTTP server、優雅關閉
-internal/config           設定載入 (YAML + ${ENV} 展開) 與驗證
+cmd/server/main.go        進入點:載入設定、啟動 worker pool 與 HTTP server、優雅關閉;-setup-webhook 註冊 webhook
+internal/config           設定載入 (YAML + ${ENV} 展開)、驗證,以及 webhook secret 自動產生/持久化
+internal/webhook          用 gh 把 webhook 註冊到 repo(冪等),沿用自動管理的 secret
 internal/github/verify.go webhook 簽章驗證 (HMAC-SHA256)
 internal/github/event.go  事件過濾 + 正規化成 Incident + 選 playbook
 internal/prompt           各 playbook 的 Codex prompt 模板 (triage / pr_review / pr_merge)
@@ -160,12 +161,19 @@ cp .env.example .env        # 填入 secret
 
 | 變數 | 用途 |
 |------|------|
-| `GITHUB_WEBHOOK_SECRET` | 驗證 webhook 簽章，需與 GitHub 上設定一致（本服務唯一自管的 secret） |
+| `GITHUB_WEBHOOK_SECRET` | 驗證 webhook 簽章用的密鑰。**可留空**:留空時服務會自動生成並存在 `<codex.workdir>/.webhook-secret`,只有想指定特定值時才需要設 |
 | `GITLAB_HOST` | 內網 GitLab base URL，會注入 Codex 子行程,讓 glab 指向正確的 instance |
 | `OPENAI_API_KEY` | （或你的 codex 安裝所需的認證）供 Codex 推理 |
 
 > gh / glab 的登入憑證**不在**上表:它們由 `gh auth login` / `glab auth login`
 > 存進各自的 CLI 設定(`~/.config/gh`、`~/.config/glab-cli`),不經過本服務。
+
+### Webhook secret 自動管理
+
+`GITHUB_WEBHOOK_SECRET` 留空時,服務在載入設定時會自動產生一把隨機密鑰(32 bytes,
+hex),寫進 `<codex.workdir>/.webhook-secret`(權限 `0600`),之後每次啟動都沿用同一把。
+你不必自己想、也不必手動同步——用內建指令把它註冊到 GitHub 即可(見下)。要指定特定值
+(例如對接一個手動建立的 webhook)才需設 `GITHUB_WEBHOOK_SECRET`,此時以環境變數為準。
 
 ---
 
@@ -191,11 +199,25 @@ export PATH="$PWD/codex/bin:$PATH"    # gh-pr-mirror.sh
 ./bin/server -config config.yaml
 ```
 
-在 GitHub repo → Settings → Webhooks 新增：
-- Payload URL：`https://<你的服務>/webhook`
-- Content type：`application/json`
-- Secret：與 `GITHUB_WEBHOOK_SECRET` 相同
-- Events：依需求勾選（例如 Workflow runs / Issues / Pull requests）
+**註冊 webhook(建議用內建指令)**:服務會用已登入的 `gh` 把 webhook 建到 repo 上,
+自動帶上正確的 payload URL、content type、要訂閱的事件(即 `config.yaml` 裡 `enabled`
+的那些),以及上面那把自動管理的 secret。同一把 secret 兩邊自動對齊,不需手動填:
+
+```bash
+./bin/server -config config.yaml \
+  -setup-webhook \
+  -repo qwe7002-ai/ci-webhook-codex-agent \
+  -webhook-url https://<你的服務>/webhook
+```
+
+- 冪等:同一個 URL 已有 webhook 就**就地更新**,不會重複建立。
+- 需要 `gh` 對該 repo 有 admin 權限(建立 webhook 的權限)。
+- 事後改了 `github.events`,再跑一次同樣指令即可把訂閱事件同步過去。
+
+> 想手動在 GitHub UI 建也可以(repo → Settings → Webhooks):Payload URL 填
+> `https://<你的服務>/webhook`、Content type 選 `application/json`、Secret 填
+> `<codex.workdir>/.webhook-secret` 的內容(或你自訂的 `GITHUB_WEBHOOK_SECRET`)、
+> Events 勾選對應項目。
 
 ### Docker
 
@@ -251,9 +273,10 @@ sudo systemctl status ci-webhook-codex-agent
 
 - **簽章必驗**：所有 webhook 都先驗 `X-Hub-Signature-256` 才處理內容；raw body
   在任何再編碼前先驗，用 constant-time 比較。
-- **Secret 不落地**：設定檔只留 `${VAR}` 佔位;本服務唯一自管的 secret 是
-  `GITHUB_WEBHOOK_SECRET`(走環境變數)。GitHub / GitLab 憑證交給 `gh` / `glab`
-  各自保管,不經過本服務的設定檔或環境變數。
+- **Secret 管理**：設定檔只留 `${VAR}` 佔位。本服務自管的唯一 secret 是 webhook 簽章密鑰:
+  由環境變數 `GITHUB_WEBHOOK_SECRET` 提供,或留空由服務自動產生並存到 `<codex.workdir>/.webhook-secret`
+  (權限 `0600`,已列入 `.gitignore`,請確保該目錄權限受控)。GitHub / GitLab 憑證則交給
+  `gh` / `glab` 各自保管,不經過本服務的設定檔或環境變數。
 - **Codex sandbox**：Codex 需要能跑 shell（`glab` / `gh` / `git`）並連到內網
   GitLab 與 GitHub，範例把 `codex.mcp.arguments` 設為 `sandbox:
   danger-full-access` + `approval-policy: never`（透過 MCP 工具參數傳入）。這代表

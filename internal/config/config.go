@@ -5,12 +5,22 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// webhookSecretFile is the basename, under codex.workdir, of the auto-managed
+// webhook secret. It is created on first run when no secret was supplied and
+// reused on every subsequent run (and by -setup-webhook), so both sides agree.
+const webhookSecretFile = ".webhook-secret"
 
 // Config is the top-level runtime configuration.
 type Config struct {
@@ -20,6 +30,11 @@ type Config struct {
 	GitLab GitLabConfig `yaml:"gitlab"`
 	PR     PRConfig     `yaml:"pr"`
 	Worker WorkerConfig `yaml:"worker"`
+
+	// WebhookSecretPath is the file the webhook secret was auto-loaded from or
+	// written to, or "" when the secret came from the environment. Set by Load;
+	// not read from YAML. Callers may log it so operators can find the secret.
+	WebhookSecretPath string `yaml:"-"`
 }
 
 // ServerConfig controls the HTTP listener.
@@ -30,8 +45,10 @@ type ServerConfig struct {
 
 // GitHubConfig controls webhook verification and which events are processed.
 type GitHubConfig struct {
-	// WebhookSecret is the shared secret configured on the GitHub webhook.
-	// Used to verify the X-Hub-Signature-256 header. Provide via ${GITHUB_WEBHOOK_SECRET}.
+	// WebhookSecret is the shared secret used to verify the X-Hub-Signature-256
+	// header. Provide it via ${GITHUB_WEBHOOK_SECRET} to pin a specific value;
+	// if left empty the agent generates one on first run and persists it under
+	// codex.workdir (see Load), so operators need not manage it by hand.
 	WebhookSecret string `yaml:"webhook_secret"`
 
 	// Events maps a GitHub event name (the X-GitHub-Event header value, e.g.
@@ -136,7 +153,50 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if err := cfg.resolveWebhookSecret(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// resolveWebhookSecret ensures GitHub.WebhookSecret is set. An explicit value
+// (from ${GITHUB_WEBHOOK_SECRET}) always wins. Otherwise it loads a persisted
+// secret from codex.workdir/.webhook-secret, generating and saving a random one
+// the first time so the operator never has to invent or track it. The same file
+// is reused on later runs and by -setup-webhook, keeping GitHub and the agent in
+// sync automatically.
+func (c *Config) resolveWebhookSecret() error {
+	if c.GitHub.WebhookSecret != "" {
+		return nil // pinned via the environment; leave it alone.
+	}
+	dir := c.Codex.Workdir
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	path := filepath.Join(dir, webhookSecretFile)
+	c.WebhookSecretPath = path
+
+	switch b, err := os.ReadFile(path); {
+	case err == nil:
+		if s := strings.TrimSpace(string(b)); s != "" {
+			c.GitHub.WebhookSecret = s
+			return nil
+		}
+		// Empty/corrupt file: fall through and regenerate.
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("read webhook secret %s: %w", path, err)
+	}
+
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Errorf("generate webhook secret: %w", err)
+	}
+	secret := hex.EncodeToString(buf)
+	if err := os.WriteFile(path, []byte(secret+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write webhook secret %s: %w", path, err)
+	}
+	c.GitHub.WebhookSecret = secret
+	return nil
 }
 
 // Default returns a Config pre-populated with sane defaults; fields present in
@@ -161,9 +221,8 @@ func Default() *Config {
 }
 
 func (c *Config) validate() error {
-	if c.GitHub.WebhookSecret == "" {
-		return fmt.Errorf("github.webhook_secret is required (set GITHUB_WEBHOOK_SECRET)")
-	}
+	// github.webhook_secret is not required here: resolveWebhookSecret (run after
+	// validation) auto-generates and persists one when it is empty.
 	if c.GitLab.Project == "" {
 		return fmt.Errorf("gitlab.project is required")
 	}

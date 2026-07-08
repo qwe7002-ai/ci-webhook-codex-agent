@@ -46,8 +46,14 @@ Next steps:
        sudo -u ci-webhook-codex-agent -H gh auth login
        sudo -u ci-webhook-codex-agent -H glab auth login --hostname gitlab.internal.corp
   3. Edit /etc/ci-webhook-codex-agent/config.yaml  (events, gitlab, pr.*)
-  4. Fill /etc/ci-webhook-codex-agent/agent.env    (webhook secret, GITLAB_HOST)
-  5. Start it:
+  4. Set GITLAB_HOST in /etc/ci-webhook-codex-agent/agent.env
+     (GITHUB_WEBHOOK_SECRET is optional — left empty it is auto-generated at
+      /var/lib/ci-webhook-codex-agent/.webhook-secret)
+  5. Register the GitHub webhook (uses gh; reuses the auto-generated secret):
+       sudo -u ci-webhook-codex-agent -H ci-webhook-codex-agent \
+         -config /etc/ci-webhook-codex-agent/config.yaml \
+         -setup-webhook -repo <owner/repo> -webhook-url https://<host>/webhook
+  6. Start it:
        systemctl start ci-webhook-codex-agent
        systemctl status ci-webhook-codex-agent
 
