@@ -1,0 +1,54 @@
+# nfpm packaging config for the .deb. ARCH and VERSION are supplied via the
+# environment by the release workflow (built once per architecture).
+name: "ci-webhook-codex-agent"
+arch: "${ARCH}"
+version: "${VERSION}"
+version_schema: none
+maintainer: "qwe7002-ai <qwe7002.ai@gmail.com>"
+description: |
+  GitHub webhook -> Codex -> GitLab agent.
+  Receives GitHub webhooks, runs Codex (via MCP) to triage events and open
+  GitLab issues, and to review/mirror/merge pull requests as GitLab MRs.
+homepage: "https://github.com/qwe7002-ai/ci-webhook-codex-agent"
+license: "BSD-3-Clause"
+section: "utils"
+priority: "optional"
+
+# git is used by the PR mirror flow. codex / glab / gh are not in Debian repos,
+# so they are documented as external prerequisites rather than hard deps.
+recommends:
+  - git
+
+contents:
+  # Built per-architecture to this fixed path just before packaging.
+  - src: ./dist/ci-webhook-codex-agent
+    dst: /usr/bin/ci-webhook-codex-agent
+    file_info:
+      mode: 0755
+
+  # Codex skill: helper on PATH + operating guide in the service working dir.
+  - src: ./codex/bin/gh-pr-mirror.sh
+    dst: /usr/bin/gh-pr-mirror.sh
+    file_info:
+      mode: 0755
+  - src: ./codex/AGENTS.md
+    dst: /var/lib/ci-webhook-codex-agent/AGENTS.md
+
+  # systemd unit.
+  - src: ./packaging/systemd/ci-webhook-codex-agent.service
+    dst: /lib/systemd/system/ci-webhook-codex-agent.service
+
+  # Config + secrets env file, both preserved across upgrades.
+  - src: ./packaging/config.yaml
+    dst: /etc/ci-webhook-codex-agent/config.yaml
+    type: "config|noreplace"
+  - src: ./packaging/agent.env
+    dst: /etc/ci-webhook-codex-agent/agent.env
+    type: "config|noreplace"
+    file_info:
+      mode: 0640
+
+scripts:
+  postinstall: ./packaging/scripts/postinstall.sh
+  preremove: ./packaging/scripts/preremove.sh
+  postremove: ./packaging/scripts/postremove.sh

@@ -1,0 +1,29 @@
+[Unit]
+Description=CI webhook -> Codex -> GitLab agent
+Documentation=https://github.com/qwe7002-ai/ci-webhook-codex-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ci-webhook-codex-agent
+Group=ci-webhook-codex-agent
+# HOME is needed by codex/glab/gh for their config/cache.
+Environment=HOME=/var/lib/ci-webhook-codex-agent
+WorkingDirectory=/var/lib/ci-webhook-codex-agent
+# Secrets (GITHUB_WEBHOOK_SECRET, GH_TOKEN, GITLAB_HOST, GITLAB_TOKEN, ...).
+EnvironmentFile=/etc/ci-webhook-codex-agent/agent.env
+ExecStart=/usr/bin/ci-webhook-codex-agent -config /etc/ci-webhook-codex-agent/config.yaml
+Restart=on-failure
+RestartSec=5
+
+# Light hardening. The agent still needs to spawn codex/glab/gh/git and reach
+# the network, so we keep /usr,/etc read-only but leave the state dir writable.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ci-webhook-codex-agent
+
+[Install]
+WantedBy=multi-user.target

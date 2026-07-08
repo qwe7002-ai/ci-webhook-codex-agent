@@ -1,0 +1,126 @@
+name: release-deb
+
+# Builds .deb packages (amd64 + arm64) and publishes them as an apt repository
+# on GitHub Pages. Triggers on a version tag (v1.2.3) or manually.
+#
+# One-time setup: repo Settings -> Pages -> Build and deployment -> Source:
+# "GitHub Actions". After the first run, install with the steps printed on the
+# published index page (https://<owner>.github.io/<repo>/).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without leading v (e.g. 0.1.0)"
+        required: true
+        default: "0.0.0-dev"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Building version $v"
+
+      - name: Install packaging tooling
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev apt-utils
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build binaries and .deb packages
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist public/pool
+          for arch in amd64 arm64; do
+            echo "== $arch =="
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+              go build -trimpath -ldflags "-s -w" -o dist/ci-webhook-codex-agent ./cmd/server
+            ARCH="$arch" VERSION="$VERSION" nfpm package -f packaging/nfpm.yaml -p deb -t public/pool/
+          done
+          ls -l public/pool
+
+      - name: Build apt repository metadata
+        run: |
+          set -euo pipefail
+          cd public
+          # Flat repository: Packages index + Release at the root.
+          dpkg-scanpackages --multiversion pool > Packages
+          gzip -kf Packages
+          apt-ftparchive release . > Release
+          echo "Generated:"; ls -l Packages Packages.gz Release
+
+      - name: Write landing page
+        env:
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          host="${BASE_URL#https://}"; host="${host%%/*}"
+          path="${BASE_URL#https://*/}"; [ "$path" = "$BASE_URL" ] && path=""
+          cat > public/index.html <<HTML
+          <!doctype html><meta charset="utf-8">
+          <title>ci-webhook-codex-agent apt repo</title>
+          <style>body{font-family:system-ui,sans-serif;max-width:820px;margin:3rem auto;padding:0 1rem;line-height:1.5}code,pre{background:#f4f4f5;border-radius:6px}pre{padding:1rem;overflow:auto}code{padding:.1rem .3rem}</style>
+          <h1>ci-webhook-codex-agent — apt 安裝</h1>
+          <p>版本 <strong>${VERSION}</strong>。支援 amd64 / arm64。</p>
+          <h2>方式 A:加入 apt repo(可 apt upgrade)</h2>
+          <pre>echo "deb [trusted=yes] ${BASE_URL} ./" | sudo tee /etc/apt/sources.list.d/ci-webhook-codex-agent.list
+          sudo apt-get update
+          sudo apt-get install ci-webhook-codex-agent</pre>
+          <h2>方式 B:直接下載 .deb</h2>
+          <pre>curl -fsSLO ${BASE_URL}pool/ci-webhook-codex-agent_${VERSION}_amd64.deb
+          sudo apt-get install ./ci-webhook-codex-agent_${VERSION}_amd64.deb</pre>
+          <h2>安裝後</h2>
+          <pre>sudo nano /etc/ci-webhook-codex-agent/config.yaml   # events / gitlab / pr
+          sudo nano /etc/ci-webhook-codex-agent/agent.env    # secrets
+          sudo systemctl start ci-webhook-codex-agent</pre>
+          <p>另需自行安裝 <code>codex</code>、<code>glab</code>、<code>gh</code>、<code>git</code>。</p>
+          <p><a href="pool/">瀏覽 .deb 檔案</a></p>
+          HTML
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

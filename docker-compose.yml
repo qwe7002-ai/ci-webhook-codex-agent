@@ -1,0 +1,25 @@
+services:
+  agent:
+    build: .
+    image: ci-webhook-codex-agent
+    ports:
+      - "8080:8080"
+    environment:
+      # Loaded from .env (see .env.example). These feed config.yaml's ${VAR}
+      # expansion and glab's auth inside the Codex process.
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+      GH_TOKEN: ${GH_TOKEN:-}
+      GITLAB_HOST: ${GITLAB_HOST}
+      GITLAB_TOKEN: ${GITLAB_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      # Provide your real config.yaml (copy from config.example.yaml).
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+    # The agent must reach the internal GitLab. If GitLab is only on a private
+    # network, attach that network here instead of the default bridge.
+    # networks:
+    #   - internal
+# networks:
+#   internal:
+#     external: true

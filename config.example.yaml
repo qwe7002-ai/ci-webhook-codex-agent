@@ -1,0 +1,80 @@
+# ci-webhook-codex-agent configuration.
+# Copy to config.yaml and adjust. ${VAR} is expanded from the environment at
+# load time, so keep secrets in env vars (see .env.example), not in this file.
+
+server:
+  addr: ":8080"        # listen address
+  path: "/webhook"     # GitHub webhook target path
+
+github:
+  # Shared secret configured on the GitHub webhook (Settings -> Webhooks).
+  # Used to verify X-Hub-Signature-256. REQUIRED.
+  webhook_secret: "${GITHUB_WEBHOOK_SECRET}"
+
+  # GitHub token (repo scope) for gh: posting PR reviews and fetching PR diffs.
+  # REQUIRED when pull_request is enabled. Exported to Codex as GH_TOKEN.
+  token: "${GH_TOKEN}"
+
+  # Which events to act on. The key is the GitHub event name (X-GitHub-Event).
+  # Any event not listed, or with enabled:false, is ignored.
+  events:
+    issues:
+      enabled: true
+      actions: ["opened", "reopened"]   # empty = any action
+
+    # PR monitoring: review each PR (gh, comment mode) and mirror it to a GitLab
+    # MR on opened/reopened; on closed+merged, merge the mirrored MR. See `pr:`.
+    pull_request:
+      enabled: true
+      actions: ["opened", "reopened", "closed"]   # "closed" drives merge-sync (only acts when merged)
+
+    push:
+      enabled: false
+
+    # CI failures -> the core "ci-webhook" use case. Only failing runs qualify.
+    workflow_run:
+      enabled: true
+      actions: ["completed"]
+      conclusions: ["failure", "timed_out", "cancelled"]   # empty = any conclusion
+
+    check_run:
+      enabled: false
+      actions: ["completed"]
+      conclusions: ["failure", "timed_out"]
+
+codex:
+  bin: "codex"
+  model: "gpt-5-codex"     # optional; injected as the "model" tool argument. Empty = codex default.
+  # Codex reads AGENTS.md (the skill/operating guide) from this working dir.
+  # Docker image ships it at /app/workspace/AGENTS.md; for local runs point this
+  # at the repo's ./codex directory.
+  workdir: "/app/workspace"
+  timeout: "5m"
+  # Codex runs as an MCP server; this agent is the MCP client (stdio JSON-RPC).
+  mcp:
+    args: ["mcp"]          # how to launch codex as an MCP server over stdio
+    tool_name: "codex"     # the tool this agent calls
+    prompt_key: "prompt"   # tool argument the rendered prompt goes into
+    # Static tool-call arguments merged into every call. sandbox/approval let
+    # Codex run glab (needs shell + network to the internal GitLab). Tighten to
+    # taste; see README "Security". Argument names track your codex version's
+    # tool schema — adjust here rather than in code if they differ.
+    arguments:
+      sandbox: "danger-full-access"
+      approval-policy: "never"
+
+gitlab:
+  host: "${GITLAB_HOST}"      # internal GitLab base URL, e.g. https://gitlab.internal.corp
+  token: "${GITLAB_TOKEN}"    # PAT/project token with api scope (create issues + MRs)
+  project: "team/incidents"   # target project path where triage issues are opened
+
+# PR playbooks (used when pull_request is enabled).
+pr:
+  review_mode: "comment"                                   # gh review mode; comment = no approve/block
+  gitlab_project: "team/web-mirror"                        # GitLab project for mirrored MRs
+  gitlab_repo_url: "https://gitlab.internal.corp/team/web-mirror.git"  # git push target (no creds; token injected at runtime)
+  target_branch: "main"                                    # base branch for mirrored MRs / merge sync
+
+worker:
+  concurrency: 2     # parallel Codex runs
+  queue_size: 100    # bounded backlog; excess deliveries get 503 (GitHub retries)
