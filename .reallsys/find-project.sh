@@ -1,68 +1,67 @@
 #!/usr/bin/env bash
 #
-# find-project.sh — quickly resolve the path of an internal GitLab project.
+# find-project.sh — map a GitHub repo to its internal GitLab (git.reall.us)
+# project, so you can quickly find the intranet project path/URL.
 #
-# Given a search term (a repo name, a keyword, or a GitHub owner/repo), this
-# queries the internal GitLab and prints the matching project path(s)
-# (path_with_namespace, e.g. team/web-mirror) plus their web URL, so you don't
-# have to remember or hand-build the intranet path.
+# The mirror keeps the same <owner>/<repo>, only the host changes:
+#   https://github.com/telegram-sms/telegram-sms
+#     -> https://git.reall.us/telegram-sms/telegram-sms
 #
 # Usage:
-#   find-project.sh <search-term> [limit]
-#   find-project.sh web-mirror
-#   find-project.sh octocat/hello-world     # the trailing repo name is used
+#   find-project.sh <github-url-or-owner/repo> [--url|--git|--path]
 #
-# Environment (never printed):
-#   GITLAB_HOST    internal GitLab base URL, e.g. https://gitlab.internal.corp
-#   GITLAB_TOKEN   PAT/project token with api scope
+#   find-project.sh https://github.com/telegram-sms/telegram-sms
+#   find-project.sh git@github.com:telegram-sms/telegram-sms.git --git
+#   find-project.sh telegram-sms/telegram-sms --path
 #
-# Output (one line per match):
-#   <path_with_namespace>\t<web_url>
-# Prints "ERROR: <reason>" to stderr and exits non-zero on failure, and exits 3
-# when the query succeeds but matches nothing.
+# Output format (default --url), one line:
+#   --url   https://git.reall.us/<owner>/<repo>        (web URL, default)
+#   --git   https://git.reall.us/<owner>/<repo>.git    (clone/push URL)
+#   --path  <owner>/<repo>                             (project path)
+#
+# The GitLab base URL defaults to https://git.reall.us; override with
+# GITLAB_HOST (e.g. GITLAB_HOST=https://git.reall.us). Prints "ERROR: <reason>"
+# to stderr and exits non-zero on bad input.
 set -euo pipefail
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 
-[ "$#" -ge 1 ] || fail "usage: find-project.sh <search-term> [limit]"
-term="$1"
-limit="${2:-20}"
+[ "$#" -ge 1 ] || fail "usage: find-project.sh <github-url-or-owner/repo> [--url|--git|--path]"
+input="$1"
+fmt="${2:---url}"
 
-[ -n "${GITLAB_HOST:-}" ]  || fail "GITLAB_HOST is not set"
-[ -n "${GITLAB_TOKEN:-}" ] || fail "GITLAB_TOKEN is not set"
+host="${GITLAB_HOST:-https://git.reall.us}"
+host="${host%/}"
+case "$host" in
+  http://*|https://*) ;;
+  *) host="https://${host}" ;;
+esac
 
-# Accept a GitHub-style "owner/repo" and search on the bare repo name, which is
-# what usually matches the mirror project on GitLab.
-search="${term##*/}"
-# URL-encode the search term (space and a few common metacharacters).
-enc="${search// /%20}"
+# Normalize any GitHub reference down to "<owner>/<repo>".
+ref="$input"
+ref="${ref%.git}"                 # drop trailing .git
+ref="${ref#git@github.com:}"      # scp-style: git@github.com:owner/repo
+ref="${ref#ssh://}"               # ssh:// urls
+ref="${ref#https://}"             # https urls
+ref="${ref#http://}"
+ref="${ref#git://}"
+ref="${ref#github.com/}"          # drop host if it was a URL
+ref="${ref#github.com:}"
+ref="${ref#/}"                    # leading slash
 
-host="${GITLAB_HOST%/}"
+# Keep only the first two path segments (owner/repo), dropping /tree/... etc.
+owner="${ref%%/*}"
+rest="${ref#*/}"
+repo="${rest%%/*}"
 
-# Fetch matching projects as JSON. Prefer glab (already authenticated); fall back
-# to a plain API call. membership=true keeps results to projects the token can
-# actually see; simple=true trims the payload.
-fetch() {
-  local path="projects?search=${enc}&membership=true&simple=true&order_by=last_activity_at&per_page=${limit}"
-  if command -v glab >/dev/null 2>&1; then
-    glab api "$path" 2>/dev/null && return 0
-  fi
-  curl -fsSL -H "PRIVATE-TOKEN: ${GITLAB_TOKEN}" "${host}/api/v4/${path}"
-}
+[ -n "$owner" ] && [ "$owner" != "$ref" ] || fail "cannot parse owner/repo from: $input"
+[ -n "$repo" ] || fail "cannot parse owner/repo from: $input"
 
-json="$(fetch)" || fail "GitLab API request failed (check GITLAB_HOST / token scope / network)"
+path="${owner}/${repo}"
 
-# Extract "path_with_namespace \t web_url" for each match, newest activity first.
-if command -v jq >/dev/null 2>&1; then
-  out="$(printf '%s' "$json" | jq -r '.[] | "\(.path_with_namespace)\t\(.web_url)"')"
-else
-  # jq-less fallback: pull the two fields out of the JSON with sed.
-  paths="$(printf '%s' "$json" | grep -o '"path_with_namespace":"[^"]*"' | sed 's/.*:"//;s/"$//')"
-  urls="$(printf '%s'  "$json" | grep -o '"web_url":"[^"]*"'            | sed 's/.*:"//;s/"$//')"
-  out="$(paste <(printf '%s\n' "$paths") <(printf '%s\n' "$urls"))"
-fi
-
-out="$(printf '%s\n' "$out" | sed '/^[[:space:]]*$/d')"
-[ -n "$out" ] || { echo "no internal project matched: $search" >&2; exit 3; }
-
-printf '%s\n' "$out"
+case "$fmt" in
+  --url|url|"")  printf '%s/%s\n' "$host" "$path" ;;
+  --git|git)     printf '%s/%s.git\n' "$host" "$path" ;;
+  --path|path)   printf '%s\n' "$path" ;;
+  *) fail "unknown format: $fmt (use --url, --git, or --path)" ;;
+esac
