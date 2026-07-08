@@ -24,7 +24,7 @@ func main() {
 	configPath := flag.String("config", "config.yaml", "path to the YAML config file")
 	setupWebhook := flag.Bool("setup-webhook", false, "register the GitHub webhook via gh for -repo, then exit")
 	repo := flag.String("repo", "", "owner/repo to register the webhook on (with -setup-webhook)")
-	webhookURL := flag.String("webhook-url", "", "public URL of this service's webhook endpoint (with -setup-webhook)")
+	webhookURL := flag.String("webhook-url", "", "override the webhook delivery URL (defaults to server.public_url + server.path)")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -41,9 +41,13 @@ func main() {
 	// -setup-webhook is a one-shot admin action: register the hook and exit,
 	// reusing the same secret the server will verify with.
 	if *setupWebhook {
+		url := *webhookURL
+		if url == "" {
+			url = webhook.EndpointURL(cfg) // from server.public_url + server.path
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := webhook.Setup(ctx, cfg, *repo, *webhookURL, log); err != nil {
+		if err := webhook.Setup(ctx, cfg, *repo, url, log); err != nil {
 			log.Error("setup webhook", "err", err)
 			os.Exit(1)
 		}

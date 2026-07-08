@@ -41,6 +41,11 @@ type Config struct {
 type ServerConfig struct {
 	Addr string `yaml:"addr"` // e.g. ":8080"
 	Path string `yaml:"path"` // webhook path, e.g. "/webhook"
+	// PublicURL is the externally reachable URL of this service, used by
+	// -setup-webhook as the webhook's delivery target. It may be just the base
+	// (scheme+host, e.g. https://ci.example.com) — Path is appended — or the full
+	// endpoint URL. Provide via ${PUBLIC_URL}. Empty unless -setup-webhook is used.
+	PublicURL string `yaml:"public_url"`
 }
 
 // GitHubConfig controls webhook verification and which events are processed.

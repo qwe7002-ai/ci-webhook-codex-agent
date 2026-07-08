@@ -5,8 +5,10 @@
 # unit), not in this file.
 
 server:
-  addr: ":8080"        # listen address
-  path: "/webhook"     # GitHub webhook target path
+  addr: ":8080"                # listen address
+  path: "/webhook"             # GitHub webhook target path
+  public_url: "${PUBLIC_URL}"  # externally reachable base URL, e.g. https://ci.example.com
+                               # used by -setup-webhook as the delivery target (path is appended)
 
 github:
   # Shared secret used to verify X-Hub-Signature-256. Optional: if empty (the

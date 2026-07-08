@@ -162,6 +162,7 @@ cp .env.example .env        # 填入 secret
 | 變數 | 用途 |
 |------|------|
 | `GITHUB_WEBHOOK_SECRET` | 驗證 webhook 簽章用的密鑰。**可留空**:留空時服務會自動生成並存在 `<codex.workdir>/.webhook-secret`,只有想指定特定值時才需要設 |
+| `PUBLIC_URL` | 本服務對外可達的 base URL(scheme + host,例如 `https://ci.example.com`),供 `-setup-webhook` 當 webhook 目標(會自動接上 `server.path`) |
 | `GITLAB_HOST` | 內網 GitLab base URL，會注入 Codex 子行程,讓 glab 指向正確的 instance |
 | `OPENAI_API_KEY` | （或你的 codex 安裝所需的認證）供 Codex 推理 |
 
@@ -203,19 +204,20 @@ export PATH="$PWD/codex/bin:$PATH"    # gh-pr-mirror.sh
 自動帶上正確的 payload URL、content type、要訂閱的事件(即 `config.yaml` 裡 `enabled`
 的那些),以及上面那把自動管理的 secret。同一把 secret 兩邊自動對齊,不需手動填:
 
+webhook 的目標網址從 `server.public_url`(即 `${PUBLIC_URL}`)+ `server.path` 組出來,
+所以設好環境變數後指令只需指定 repo:
+
 ```bash
-./bin/server -config config.yaml \
-  -setup-webhook \
-  -repo qwe7002-ai/ci-webhook-codex-agent \
-  -webhook-url https://<你的服務>/webhook
+./bin/server -config config.yaml -setup-webhook -repo qwe7002-ai/ci-webhook-codex-agent
 ```
 
 - 冪等:同一個 URL 已有 webhook 就**就地更新**,不會重複建立。
 - 需要 `gh` 對該 repo 有 admin 權限(建立 webhook 的權限)。
 - 事後改了 `github.events`,再跑一次同樣指令即可把訂閱事件同步過去。
+- 想臨時指定別的網址,加 `-webhook-url https://.../webhook` 覆蓋 `public_url`。
 
 > 想手動在 GitHub UI 建也可以(repo → Settings → Webhooks):Payload URL 填
-> `https://<你的服務>/webhook`、Content type 選 `application/json`、Secret 填
+> `${PUBLIC_URL}` + `server.path`、Content type 選 `application/json`、Secret 填
 > `<codex.workdir>/.webhook-secret` 的內容(或你自訂的 `GITHUB_WEBHOOK_SECRET`)、
 > Events 勾選對應項目。
 
