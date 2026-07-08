@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Map a GitHub repo to its internal GitLab project, driven by a TOML config.
+"""Map a GitHub repo to its internal GitLab project.
 
-The mirror normally keeps the same <owner>/<repo> and only swaps the host
-(github.com -> git.reall.us). projects.toml holds the default host plus any
-per-project overrides for repos whose intranet path or host differs.
+The mirror keeps the same <owner>/<repo> and only swaps the host, so config.toml
+just records the GitLab address:
+    github.com/telegram-sms/telegram-sms -> git.reall.us/telegram-sms/telegram-sms
 
 Usage:
     find-project.py <github-url-or-owner/repo> [--url|--git|--path] [--config PATH]
@@ -15,8 +15,8 @@ Usage:
     find-project.py git@github.com:telegram-sms/telegram-sms.git --path
       -> telegram-sms/telegram-sms
 
-Config resolution: --config, else $REALLSYS_CONFIG, else projects.toml next to
-this script. default_host may be overridden by $GITLAB_HOST.
+Config resolution: --config, else $REALLSYS_CONFIG, else config.toml next to
+this script. gitlab_host may be overridden by $GITLAB_HOST.
 """
 from __future__ import annotations
 
@@ -25,10 +25,9 @@ import os
 import sys
 import tomllib
 from pathlib import Path
-from urllib.parse import urlsplit
 
 
-def die(msg: str) -> "None":
+def die(msg: str) -> None:
     print(f"ERROR: {msg}", file=sys.stderr)
     raise SystemExit(1)
 
@@ -58,7 +57,7 @@ def normalize_host(host: str) -> str:
     return host
 
 
-def load_config(path: Path) -> tuple[str, dict[str, str]]:
+def load_host(path: Path) -> str:
     if not path.is_file():
         die(f"config not found: {path}")
     try:
@@ -66,36 +65,17 @@ def load_config(path: Path) -> tuple[str, dict[str, str]]:
             data = tomllib.load(fh)
     except tomllib.TOMLDecodeError as exc:
         die(f"invalid TOML in {path}: {exc}")
-    default_host = os.environ.get("GITLAB_HOST") or data.get("default_host") or ""
-    if not default_host:
-        die(f"no default_host in {path} and $GITLAB_HOST is unset")
-    overrides: dict[str, str] = {}
-    for i, proj in enumerate(data.get("projects", [])):
-        gh, gl = proj.get("github"), proj.get("gitlab")
-        if not gh or not gl:
-            die(f"projects[{i}] needs both 'github' and 'gitlab'")
-        overrides[gh.strip().lower()] = gl.strip()
-    return normalize_host(default_host), overrides
+    host = os.environ.get("GITLAB_HOST") or data.get("gitlab_host") or ""
+    if not host:
+        die(f"no gitlab_host in {path} and $GITLAB_HOST is unset")
+    return normalize_host(host)
 
 
 def default_config_path() -> Path:
     env = os.environ.get("REALLSYS_CONFIG")
     if env:
         return Path(env)
-    return Path(__file__).resolve().parent / "projects.toml"
-
-
-def emit(base_url: str, path: str, fmt: str) -> str:
-    base_url = base_url.rstrip("/")
-    if base_url.endswith(".git"):
-        base_url = base_url[: -len(".git")]
-    if fmt == "url":
-        return base_url
-    if fmt == "git":
-        return base_url + ".git"
-    if fmt == "path":
-        return path
-    die(f"unknown format: {fmt}")
+    return Path(__file__).resolve().parent / "config.toml"
 
 
 def main() -> None:
@@ -109,21 +89,15 @@ def main() -> None:
     ap.set_defaults(fmt="url")
     args = ap.parse_args()
 
-    default_host, overrides = load_config(args.config or default_config_path())
-    repo_path = normalize_repo(args.repo)
+    host = load_host(args.config or default_config_path())
+    path = normalize_repo(args.repo)
 
-    override = overrides.get(repo_path.lower())
-    if override is not None:
-        base_url = override
-        # Derive the project path from the override URL's path component.
-        path = urlsplit(base_url).path.strip("/")
-        if path.endswith(".git"):
-            path = path[: -len(".git")]
+    if args.fmt == "path":
+        print(path)
+    elif args.fmt == "git":
+        print(f"{host}/{path}.git")
     else:
-        base_url = f"{default_host}/{repo_path}"
-        path = repo_path
-
-    print(emit(base_url, path, args.fmt))
+        print(f"{host}/{path}")
 
 
 if __name__ == "__main__":
