@@ -72,53 +72,21 @@ var templates = map[string]*template.Template{
 	github.PlaybookPRMergeSync: template.Must(template.New("pr_merge").Parse(prMergeTmpl)),
 }
 
+// The per-call prompts are deliberately thin: the full procedure, safety rules,
+// projects.toml resolution, and output contract live once in AGENTS.md, which
+// Codex always reads from its working directory (the global prompt). Each prompt
+// only names the playbook and supplies the event data and runtime parameters.
+
 // triageTmpl: evaluate the event and open a GitLab issue (issues/CI/push/...).
-const triageTmpl = `You are a preliminary triage agent for CI / engineering incidents. Below is a webhook event from GitHub.
+const triageTmpl = `Run the triage_issue playbook from AGENTS.md for the GitHub event below.
 
-## Your task
-1. Read the event and make a "preliminary evaluation" covering at least:
-   - category: one or more of [bug, ci-failure, feature, question, security, infra, flaky-test]
-   - severity: S1 (critical) / S2 (high) / S3 (medium) / S4 (low)
-   - suggested priority: P0 / P1 / P2 / P3
-   - likely-cause: your initial guess
-   - impact: who / what is affected
-   - next-steps: 2-4 bullet points
-   Note this is a "preliminary" evaluation; uncertainty is allowed — when unsure, say so and give a confidence level (low/medium/high).
-
-2. Create an issue in the internal GitLab project ` + "`{{.GitLabProject}}`" + ` using the glab CLI (GITLAB_HOST and GITLAB_TOKEN are already set, no login needed):
-
-   glab issue create \
-     --repo "{{.GitLabProject}}" \
-     --title "<concise title, including the source repo>" \
-     --description "<see body format below>" \
-     --label "triage,<category>,severity::<S1..S4>,priority::<P0..P3>" \
-     --yes
-
-   The issue body should include: the preliminary evaluation (bulleted), the next-steps, and the
-   original event (GitHub link and key fields), with a note at the end that "this issue was created by
-   an automated triage agent; the evaluation is advisory only and needs human confirmation".
+## Parameters
+- GitLab issue project (<PROJECT>): {{.GitLabProject}}
 {{- if .IsGitHubIssue}}
-
-3. Reply on the original GitHub issue so the reporter knows it was forwarded and triaged. Post one
-   comment with gh (GH_TOKEN is set), linking the internal GitLab issue you just created:
-     gh issue comment "{{.URL}}" --body "<short note: forwarded to the internal tracker and triaged; include the GitLab issue URL from step 2 and the one-line assessment; note it is automated>"
-   If the comment fails, do not abort the whole run — still report the ISSUE_URL below and set
-   GITHUB_COMMENT to "failed".
-
-4. On success, print:
-   ISSUE_URL: <issue URL returned by glab>
-   GITHUB_COMMENT: <URL of the GitHub issue comment, or "failed">
-   SUMMARY: <one-sentence summary of your evaluation>
-   On failure, print ERROR: <reason>, and do not retry more than once.
-{{- else}}
-
-3. On success, print two lines:
-   ISSUE_URL: <issue URL returned by glab>
-   SUMMARY: <one-sentence summary of your evaluation>
-   On failure, print ERROR: <reason>, and do not retry more than once.
+- Source is a GitHub issue: after filing, reply on it and report GITHUB_COMMENT (see playbook).
 {{- end}}
 
-## Event info
+## Event
 - event: {{.EventType}}{{if .Action}} / {{.Action}}{{end}}
 - source repo: {{.Repo}}
 - title: {{.Title}}
@@ -134,73 +102,32 @@ const triageTmpl = `You are a preliminary triage agent for CI / engineering inci
 `
 
 // prReviewTmpl: review a GitHub PR (gh) and mirror it as a GitLab MR (git + glab).
-const prReviewTmpl = `You are a PR review + mirror agent. Below is a GitHub pull_request event (action={{.Action}}).
-The environment has GH_TOKEN (for gh) and GITLAB_HOST / GITLAB_TOKEN (for glab) set; git and the helper script gh-pr-mirror.sh are available.
-The authoritative spec for this flow is AGENTS.md in the working directory — always follow its safety rules (reviews always comment mode, only push the mirror branch, never force-push, never leak tokens).
+const prReviewTmpl = `Run the pr_review playbook from AGENTS.md for the GitHub pull_request event below (action={{.Action}}).
 
-## Task 0: resolve the internal GitLab target for this repo
-Read projects.toml in your working directory and resolve the mirror target for the source repo {{.Repo}}:
-- if an entry's github equals "{{.Repo}}", MIRROR_PROJECT is that entry's gitlab path; otherwise MIRROR_PROJECT is "{{.Repo}}".
-- the mirror git URL is <default_host>/<MIRROR_PROJECT>.git (default_host from projects.toml).
-Use MIRROR_PROJECT and that URL in the commands below. If projects.toml is missing, fall back to
-project "{{.PRProject}}" and URL "{{.MirrorRepoURL}}".
-
-## Task A: review the GitHub PR and leave the review as a comment
-1. Fetch content and diff:
-     gh pr view "{{.URL}}" --json title,body,author,files,additions,deletions
-     gh pr diff "{{.URL}}"
-2. Do a preliminary code review focused on: correctness, possible bugs, test coverage, risk, readability. Bullet the key points and suggestions.
-3. Post it in "comment" mode (do not approve, do not request-changes):
-     gh pr review "{{.URL}}" --comment --body "<your review, in Markdown>"
-   Note at the end of the review that it is "auto-generated by an agent and advisory only".
-
-## Task B: mirror this PR as an internal GitLab MR
-Use the stable branch name ` + "`{{.MirrorBranch}}`" + ` (so later merge-sync can match the same MR).
-1. Push the mirror branch with the helper (automatic shallow checkout + safe token handling; do not assemble the token/URL yourself). Use the mirror git URL resolved in Task 0:
-     gh-pr-mirror.sh {{.PR.Number}} {{.Repo}} "<mirror git URL>" {{.MirrorBranch}}
-   (On success it prints MIRROR_PUSHED: ok; on failure it prints ERROR:, in which case just report ERROR and finish.)
-2. Idempotently create/reuse the corresponding MR in MIRROR_PROJECT (target branch {{.TargetBranch}}); check first whether it exists, and if so reuse its URL:
-     glab mr list   --repo "<MIRROR_PROJECT>" --source-branch "{{.MirrorBranch}}"
-     glab mr create --repo "<MIRROR_PROJECT>" \
-       --source-branch "{{.MirrorBranch}}" --target-branch "{{.TargetBranch}}" \
-       --title "[mirror] {{.Title}}" \
-       --description "Mirrored from GitHub PR {{.URL}} (#{{.PR.Number}}). Includes the review summary above. Created by an automated agent." \
-       --yes
-
-## Output (final)
-   REVIEW_POSTED: yes|no
-   MR_URL: <GitLab MR URL, if any>
-   SUMMARY: <one-sentence summary of the review and mirror result>
-   If any step fails, print ERROR: <reason>, and do not retry more than once.
+## Parameters
+- source repo: {{.Repo}}
+- PR number: {{.PR.Number}}
+- PR URL: {{.URL}}
+- PR title: {{.Title}}
+- mirror branch: {{.MirrorBranch}}
+- MR target branch (<TARGET>): {{.TargetBranch}}
+- projects.toml fallback if unreadable — MIRROR_PROJECT: {{.PRProject}}, mirror git URL: {{.MirrorRepoURL}}
 
 ## PR info
-- repo: {{.Repo}}  PR: #{{.PR.Number}}  link: {{.URL}}
 - head (source): {{.PR.HeadRef}} @ {{.PR.HeadSHA}}  ->  base (target): {{.PR.BaseRef}}
 - head repo: {{.PR.HeadRepoURL}}
-- title: {{.Title}}
-- description:
+
+## PR description
 {{if .Summary}}{{.Summary}}{{else}}(none){{end}}
 `
 
 // prMergeTmpl: the GitHub PR was merged; merge the mirrored GitLab MR.
-const prMergeTmpl = `You are a PR merge-sync agent. GitHub PR #{{.PR.Number}} ({{.URL}}) has been **merged**
-(merge commit {{.PR.MergeSHA}}). Sync this merge to the internal GitLab.
-The environment has GH_TOKEN, GITLAB_HOST / GITLAB_TOKEN set; git and the helper script gh-pr-mirror.sh are available. The mirror branch name is ` + "`{{.MirrorBranch}}`" + `.
-The authoritative spec for this flow is AGENTS.md in the working directory — always follow its safety rules (do not force-push on conflict; report ERROR instead).
+const prMergeTmpl = `Run the pr_merge_sync playbook from AGENTS.md: GitHub PR #{{.PR.Number}} ({{.URL}}) has been merged (merge commit {{.PR.MergeSHA}}). Sync it to the internal GitLab.
 
-## Task
-0. Read projects.toml in your working directory and resolve the mirror target for the source repo {{.Repo}}:
-   if an entry's github equals "{{.Repo}}", MIRROR_PROJECT is that entry's gitlab path, else MIRROR_PROJECT is "{{.Repo}}"; the mirror git URL is <default_host>/<MIRROR_PROJECT>.git. If projects.toml is missing, fall back to project "{{.PRProject}}" and URL "{{.MirrorRepoURL}}".
-1. Push the merged head to the mirror branch with the helper (safe token handling), using the resolved mirror git URL:
-     gh-pr-mirror.sh {{.PR.Number}} {{.Repo}} "<mirror git URL>" {{.MirrorBranch}}
-2. Find the corresponding GitLab MR in MIRROR_PROJECT and merge it (source branch {{.MirrorBranch}}, target {{.TargetBranch}}):
-     glab mr list --repo "<MIRROR_PROJECT>" --source-branch "{{.MirrorBranch}}"
-     glab mr merge <iid> --repo "<MIRROR_PROJECT>" --yes
-   If no corresponding MR exists, create it first with glab mr create (source {{.MirrorBranch}} / target {{.TargetBranch}}), then merge.
-   If GitLab cannot auto-merge due to a conflict, do not force-push — print ERROR with an explanation instead.
-
-## Output (final)
-   MR_URL: <URL of the merged GitLab MR>
-   SUMMARY: <one-sentence summary of the sync result>
-   On failure, print ERROR: <reason>, and do not retry more than once.
+## Parameters
+- source repo: {{.Repo}}
+- PR number: {{.PR.Number}}
+- mirror branch: {{.MirrorBranch}}
+- MR target branch: {{.TargetBranch}}
+- projects.toml fallback if unreadable — MIRROR_PROJECT: {{.PRProject}}, mirror git URL: {{.MirrorRepoURL}}
 `
