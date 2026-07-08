@@ -1,38 +1,41 @@
-// Package codex invokes the Codex CLI in non-interactive ("exec") mode to run
-// the triage and create the GitLab issue via glab.
+// Package codex drives Codex over MCP: it launches `codex mcp` (stdio JSON-RPC),
+// calls the Codex tool with the triage prompt, and parses the final message.
+// Codex, in that session, does the evaluation and creates the GitLab issue via
+// the glab CLI.
 package codex
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/qwe7002-ai/ci-webhook-codex-agent/internal/config"
 	"github.com/qwe7002-ai/ci-webhook-codex-agent/internal/github"
+	"github.com/qwe7002-ai/ci-webhook-codex-agent/internal/mcp"
 	"github.com/qwe7002-ai/ci-webhook-codex-agent/internal/prompt"
 )
 
-// Runner runs Codex for incidents. It is safe for concurrent use.
+// Runner runs Codex for incidents. It is safe for concurrent use: each Run
+// launches its own isolated `codex mcp` process.
 type Runner struct {
 	cfg *config.Config
+	log *slog.Logger
 }
 
-func New(cfg *config.Config) *Runner { return &Runner{cfg: cfg} }
+func New(cfg *config.Config, log *slog.Logger) *Runner { return &Runner{cfg: cfg, log: log} }
 
 // Result is the parsed outcome of a Codex run.
 type Result struct {
 	IssueURL string // parsed from an "ISSUE_URL:" line, if present
 	Summary  string // parsed from a "SUMMARY:" line, if present
-	Stdout   string // full stdout, for logging/debugging
+	Output   string // full final message, for logging/debugging
 }
 
-// Run renders the prompt, invokes the Codex CLI with a timeout, and returns the
-// parsed result. The GitLab host/token are injected into the child environment
-// so glab (called by Codex) can talk to the internal instance without an
-// interactive login.
+// Run renders the prompt, opens an MCP session to Codex, calls the tool, and
+// parses the result. The GitLab host/token are injected into the `codex mcp`
+// child environment so glab (called by Codex) authenticates without a login.
 func (r *Runner) Run(ctx context.Context, inc github.Incident) (*Result, error) {
 	promptText, err := prompt.Render(inc, r.cfg.GitLab.Project)
 	if err != nil {
@@ -42,35 +45,45 @@ func (r *Runner) Run(ctx context.Context, inc github.Incident) (*Result, error) 
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.Codex.Timeout)
 	defer cancel()
 
-	args := append([]string{}, r.cfg.Codex.Args...)
+	mc := r.cfg.Codex.MCP
+	client, err := mcp.Start(ctx, r.cfg.Codex.Bin, mc.Args, r.childEnv(), r.cfg.Codex.Workdir, r.log)
+	if err != nil {
+		return nil, fmt.Errorf("start codex mcp: %w", err)
+	}
+	defer client.Close()
+
+	args := r.toolArgs(promptText)
+	res, err := client.CallTool(ctx, mc.ToolName, args)
+	if err != nil {
+		return nil, fmt.Errorf("codex tool call: %w", err)
+	}
+
+	out := res.Text()
+	result := &Result{Output: out}
+	result.IssueURL = extractField(out, "ISSUE_URL:")
+	result.Summary = extractField(out, "SUMMARY:")
+
+	if res.IsError {
+		return result, fmt.Errorf("codex tool returned error: %s", truncate(out, 2000))
+	}
+	if errLine := extractField(out, "ERROR:"); errLine != "" && result.IssueURL == "" {
+		return result, fmt.Errorf("codex reported error: %s", errLine)
+	}
+	return result, nil
+}
+
+// toolArgs builds the tool-call arguments: the configured static arguments,
+// plus the prompt (under the configured key) and optional model override.
+func (r *Runner) toolArgs(promptText string) map[string]any {
+	args := make(map[string]any, len(r.cfg.Codex.MCP.Arguments)+2)
+	for k, v := range r.cfg.Codex.MCP.Arguments {
+		args[k] = v
+	}
+	args[r.cfg.Codex.MCP.PromptKey] = promptText
 	if r.cfg.Codex.Model != "" {
-		args = append(args, "-m", r.cfg.Codex.Model)
+		args["model"] = r.cfg.Codex.Model
 	}
-	// The prompt is passed on stdin so we never hit argv length limits or need
-	// to shell-escape multi-line, attacker-influenced payload text.
-	args = append(args, "-")
-
-	cmd := exec.CommandContext(ctx, r.cfg.Codex.Bin, args...)
-	cmd.Dir = r.cfg.Codex.Workdir
-	cmd.Stdin = strings.NewReader(promptText)
-	cmd.Env = r.childEnv()
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("codex exec failed: %w\nstderr:\n%s", err, truncate(stderr.String(), 4000))
-	}
-
-	out := stdout.String()
-	res := &Result{Stdout: out}
-	res.IssueURL = extractField(out, "ISSUE_URL:")
-	res.Summary = extractField(out, "SUMMARY:")
-	if errLine := extractField(out, "ERROR:"); errLine != "" && res.IssueURL == "" {
-		return res, fmt.Errorf("codex reported error: %s", errLine)
-	}
-	return res, nil
+	return args
 }
 
 // childEnv builds the environment for the Codex process: inherit the parent's,

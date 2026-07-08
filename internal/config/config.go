@@ -50,13 +50,30 @@ type EventFilter struct {
 	Conclusions []string `yaml:"conclusions"`
 }
 
-// CodexConfig controls how the Codex CLI is invoked.
+// CodexConfig controls how Codex is invoked. Codex runs as an MCP server
+// (`codex mcp`, stdio JSON-RPC); this agent is the MCP client and drives one
+// triage per incident by calling Codex's tool.
 type CodexConfig struct {
-	Bin     string        `yaml:"bin"`      // path to the codex binary
-	Args    []string      `yaml:"args"`     // base args, e.g. ["exec", "--skip-git-repo-check"]
-	Model   string        `yaml:"model"`    // optional model override, passed as -m
-	Workdir string        `yaml:"workdir"`  // working dir for the codex process
-	Timeout time.Duration `yaml:"timeout"`  // per-invocation timeout
+	Bin     string        `yaml:"bin"`     // path to the codex binary
+	Model   string        `yaml:"model"`   // optional; injected as the "model" tool argument
+	Workdir string        `yaml:"workdir"` // working dir for the codex mcp process
+	Timeout time.Duration `yaml:"timeout"` // per-invocation timeout
+	MCP     MCPConfig     `yaml:"mcp"`     // MCP transport / tool-call shape
+}
+
+// MCPConfig describes how to launch and call the Codex MCP server. The tool
+// name and argument keys are configurable so the agent can track Codex CLI
+// versions whose tool schema differs, without code changes.
+type MCPConfig struct {
+	// Args launches Codex as a stdio MCP server, e.g. ["mcp"].
+	Args []string `yaml:"args"`
+	// ToolName is the MCP tool to call (Codex exposes "codex").
+	ToolName string `yaml:"tool_name"`
+	// PromptKey is the tool argument the rendered prompt is placed into.
+	PromptKey string `yaml:"prompt_key"`
+	// Arguments are static tool-call arguments merged into every call
+	// (e.g. sandbox: danger-full-access, approval-policy: never).
+	Arguments map[string]any `yaml:"arguments"`
 }
 
 // GitLabConfig is passed through to glab (which Codex calls). Host and Token are
@@ -101,9 +118,13 @@ func Default() *Config {
 		Server: ServerConfig{Addr: ":8080", Path: "/webhook"},
 		Codex: CodexConfig{
 			Bin:     "codex",
-			Args:    []string{"exec", "--skip-git-repo-check"},
 			Workdir: os.TempDir(),
 			Timeout: 5 * time.Minute,
+			MCP: MCPConfig{
+				Args:      []string{"mcp"},
+				ToolName:  "codex",
+				PromptKey: "prompt",
+			},
 		},
 		Worker: WorkerConfig{Concurrency: 2, QueueSize: 100},
 	}
@@ -124,6 +145,16 @@ func (c *Config) validate() error {
 	}
 	if c.Worker.QueueSize < 1 {
 		c.Worker.QueueSize = 1
+	}
+	// Backstop MCP defaults in case a partial mcp: block cleared them.
+	if len(c.Codex.MCP.Args) == 0 {
+		c.Codex.MCP.Args = []string{"mcp"}
+	}
+	if c.Codex.MCP.ToolName == "" {
+		c.Codex.MCP.ToolName = "codex"
+	}
+	if c.Codex.MCP.PromptKey == "" {
+		c.Codex.MCP.PromptKey = "prompt"
 	}
 	return nil
 }

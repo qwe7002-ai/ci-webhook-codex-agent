@@ -10,11 +10,16 @@ GitHub ──webhook──▶  Go webhook server
                        3. 立刻回 202,丟進 worker queue
                               │
                               ▼
-                       worker pool ──▶ codex exec  (prompt = 正規化後的事件)
+                       worker pool ──MCP client──▶ codex mcp (stdio JSON-RPC)
+                                          │  tools/call codex(prompt=正規化事件)
                                           │  Codex 推理 + 初步評判
                                           ▼
                                        glab CLI ──▶ 內網 GitLab:建立 issue
 ```
+
+Codex 以 **MCP server**(`codex mcp`,stdio JSON-RPC)執行,本 agent 是 **MCP
+client**:每個事件開一個 `codex mcp` 子行程,完成 `initialize` 交握後呼叫
+`tools/call` 的 `codex` 工具,把 prompt 當參數送進去,再解析工具回傳的最終訊息。
 
 為什麼要「立刻回 202 再非同步處理」:GitHub 對 webhook 回應有約 10 秒的逾時，
 而一次 Codex 推理可能要數十秒到數分鐘。因此 server 只做「驗證 + 入列」，實際
@@ -35,10 +40,11 @@ GitHub ──webhook──▶  Go webhook server
    觸發者 / 事件專屬欄位），下游一律吃這個結構。
 4. **入列**：去重（依 `X-GitHub-Delivery`，防止 GitHub 重送造成重複 issue）後
    丟進 bounded queue，回 `202`。佇列滿了回 `503`，讓 GitHub 之後重送。
-5. **評判 + 建立 issue**：worker 把 `Incident` 套進 prompt，呼叫 `codex exec`。
-   Codex 讀事件、產出初步評判（類別 / 嚴重度 / 優先級 / 可能原因 / 影響 / 下一步），
-   再用 `glab issue create` 在內網 GitLab 開 issue，最後印出 `ISSUE_URL:` 與
-   `SUMMARY:` 兩行讓 server 解析並記錄。
+5. **評判 + 建立 issue**：worker 把 `Incident` 套進 prompt，透過 MCP 呼叫 Codex
+   的 `codex` 工具。Codex 讀事件、產出初步評判（類別 / 嚴重度 / 優先級 / 可能原因 /
+   影響 / 下一步），再用 `glab issue create` 在內網 GitLab 開 issue，最後在最終訊息
+   印出 `ISSUE_URL:` 與 `SUMMARY:` 兩行讓 server 解析並記錄。執行期間 Codex 串流的
+   MCP 通知(進度事件)會被 client 記錄後略過,直到工具回傳最終結果。
 
 ### 初步評判 (preliminary evaluation) 內容
 
@@ -66,7 +72,8 @@ internal/config           設定載入 (YAML + ${ENV} 展開) 與驗證
 internal/github/verify.go webhook 簽章驗證 (HMAC-SHA256)
 internal/github/event.go  事件過濾 + 正規化成 Incident
 internal/prompt           Codex prompt 模板 (含 glab 指令與評判規格)
-internal/codex            呼叫 codex exec、注入 GITLAB_* 環境變數、解析輸出
+internal/mcp              精簡 MCP stdio client (initialize + tools/call)
+internal/codex            啟動 codex mcp、注入 GITLAB_* 環境變數、呼叫工具、解析輸出
 internal/worker           bounded queue + worker pool + 去重
 internal/server           HTTP 路由與 webhook handler
 scripts/setup-glab.sh     (選用) 手動驗證 glab 能連到內網 GitLab
@@ -137,12 +144,19 @@ docker compose up --build
 - **簽章必驗**：所有 webhook 都先驗 `X-Hub-Signature-256` 才處理內容；raw body
   在任何再編碼前先驗，用 constant-time 比較。
 - **Secret 不落地**：token 走環境變數，設定檔只留 `${VAR}` 佔位。
-- **Codex sandbox**：Codex 需要能跑 shell（`glab`）並連到內網 GitLab，範例設定
-  用 `sandbox_mode="danger-full-access"` + `approval_policy="never"`。這代表
-  Codex 在該容器內可執行任意指令，請務必：
+- **Codex sandbox**：Codex 需要能跑 shell（`glab`）並連到內網 GitLab，範例把
+  `codex.mcp.arguments` 設為 `sandbox: danger-full-access` + `approval-policy:
+  never`（透過 MCP 工具參數傳入）。這代表 Codex 在該容器內可執行任意指令，請務必：
   - 跑在**隔離、最小權限**的容器/主機，只給它到 GitLab 與 model API 的網路；
   - `GITLAB_TOKEN` 只給必要的專案與 `api` scope；
   - 有需要可改成 `workspace-write` + 限制網路，並在 prompt 白名單化只允許 `glab`。
+- **MCP 交握**：本 agent 不實作 server→client 的請求（sampling / elicitation
+  等),收到就回 `method not supported` 拒絕。搭配 `approval-policy: never`,正常
+  流程不會走到這條路;若你改了 approval 政策而 Codex 需要人工核准,工具呼叫會因為
+  被拒絕而失敗——這是刻意的(自動化流程不該卡在互動核准)。
+- **工具參數相容性**:`codex` 工具的參數名稱(如 `sandbox` / `approval-policy`)
+  會隨 Codex 版本的 tool schema 變動。它們放在 `config.yaml` 的
+  `codex.mcp.arguments`,可直接改設定對齊你的版本,不需動程式。
 - **外部輸入**：payload 內文（issue/PR/commit 訊息）屬不可信輸入，會被放進
   prompt。Codex 被指示只做「建立 issue」這一件事並最多重試一次；請勿放寬到讓它
   執行 payload 內文中要求的其他動作。
@@ -154,7 +168,7 @@ docker compose up --build
 ## 開發
 
 ```bash
-make test    # 單元測試 (簽章驗證 + 事件過濾/正規化)
+make test    # 單元測試 (簽章驗證 + 事件過濾/正規化 + MCP client 交握/工具呼叫)
 make vet
 ```
 

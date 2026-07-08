@@ -31,7 +31,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	runner := codex.New(cfg)
+	runner := codex.New(cfg, log)
 	pool := worker.New(cfg, runner, log)
 
 	// Root context cancelled on SIGINT/SIGTERM; workers stop accepting new runs.

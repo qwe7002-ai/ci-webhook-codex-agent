@@ -38,19 +38,21 @@ github:
 
 codex:
   bin: "codex"
-  # Base args for non-interactive exec. Sandbox/approval are set so Codex may run
-  # glab (needs shell + network to the internal GitLab). Tighten to taste; see
-  # README "Security" section for the trade-offs of full-access sandboxing.
-  args:
-    - "exec"
-    - "--skip-git-repo-check"
-    - "-c"
-    - "sandbox_mode=\"danger-full-access\""
-    - "-c"
-    - "approval_policy=\"never\""
-  model: "gpt-5-codex"     # optional; passed as -m. Leave empty to use codex default.
+  model: "gpt-5-codex"     # optional; injected as the "model" tool argument. Empty = codex default.
   workdir: "/tmp"
   timeout: "5m"
+  # Codex runs as an MCP server; this agent is the MCP client (stdio JSON-RPC).
+  mcp:
+    args: ["mcp"]          # how to launch codex as an MCP server over stdio
+    tool_name: "codex"     # the tool this agent calls
+    prompt_key: "prompt"   # tool argument the rendered prompt goes into
+    # Static tool-call arguments merged into every call. sandbox/approval let
+    # Codex run glab (needs shell + network to the internal GitLab). Tighten to
+    # taste; see README "Security". Argument names track your codex version's
+    # tool schema — adjust here rather than in code if they differ.
+    arguments:
+      sandbox: "danger-full-access"
+      approval-policy: "never"
 
 gitlab:
   host: "${GITLAB_HOST}"      # internal GitLab base URL, e.g. https://gitlab.internal.corp
