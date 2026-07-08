@@ -138,6 +138,13 @@ const prReviewTmpl = `You are a PR review + mirror agent. Below is a GitHub pull
 The environment has GH_TOKEN (for gh) and GITLAB_HOST / GITLAB_TOKEN (for glab) set; git and the helper script gh-pr-mirror.sh are available.
 The authoritative spec for this flow is AGENTS.md in the working directory — always follow its safety rules (reviews always comment mode, only push the mirror branch, never force-push, never leak tokens).
 
+## Task 0: resolve the internal GitLab target for this repo
+Read projects.toml in your working directory and resolve the mirror target for the source repo {{.Repo}}:
+- if an entry's github equals "{{.Repo}}", MIRROR_PROJECT is that entry's gitlab path; otherwise MIRROR_PROJECT is "{{.Repo}}".
+- the mirror git URL is <default_host>/<MIRROR_PROJECT>.git (default_host from projects.toml).
+Use MIRROR_PROJECT and that URL in the commands below. If projects.toml is missing, fall back to
+project "{{.PRProject}}" and URL "{{.MirrorRepoURL}}".
+
 ## Task A: review the GitHub PR and leave the review as a comment
 1. Fetch content and diff:
      gh pr view "{{.URL}}" --json title,body,author,files,additions,deletions
@@ -149,12 +156,12 @@ The authoritative spec for this flow is AGENTS.md in the working directory — a
 
 ## Task B: mirror this PR as an internal GitLab MR
 Use the stable branch name ` + "`{{.MirrorBranch}}`" + ` (so later merge-sync can match the same MR).
-1. Push the mirror branch with the helper (automatic shallow checkout + safe token handling; do not assemble the token/URL yourself):
-     gh-pr-mirror.sh {{.PR.Number}} {{.Repo}} "{{.MirrorRepoURL}}" {{.MirrorBranch}}
+1. Push the mirror branch with the helper (automatic shallow checkout + safe token handling; do not assemble the token/URL yourself). Use the mirror git URL resolved in Task 0:
+     gh-pr-mirror.sh {{.PR.Number}} {{.Repo}} "<mirror git URL>" {{.MirrorBranch}}
    (On success it prints MIRROR_PUSHED: ok; on failure it prints ERROR:, in which case just report ERROR and finish.)
-2. Idempotently create/reuse the corresponding MR (target branch {{.TargetBranch}}); check first whether it exists, and if so reuse its URL:
-     glab mr list   --repo "{{.PRProject}}" --source-branch "{{.MirrorBranch}}"
-     glab mr create --repo "{{.PRProject}}" \
+2. Idempotently create/reuse the corresponding MR in MIRROR_PROJECT (target branch {{.TargetBranch}}); check first whether it exists, and if so reuse its URL:
+     glab mr list   --repo "<MIRROR_PROJECT>" --source-branch "{{.MirrorBranch}}"
+     glab mr create --repo "<MIRROR_PROJECT>" \
        --source-branch "{{.MirrorBranch}}" --target-branch "{{.TargetBranch}}" \
        --title "[mirror] {{.Title}}" \
        --description "Mirrored from GitHub PR {{.URL}} (#{{.PR.Number}}). Includes the review summary above. Created by an automated agent." \
@@ -182,11 +189,13 @@ The environment has GH_TOKEN, GITLAB_HOST / GITLAB_TOKEN set; git and the helper
 The authoritative spec for this flow is AGENTS.md in the working directory — always follow its safety rules (do not force-push on conflict; report ERROR instead).
 
 ## Task
-1. Push the merged head to the mirror branch with the helper (safe token handling):
-     gh-pr-mirror.sh {{.PR.Number}} {{.Repo}} "{{.MirrorRepoURL}}" {{.MirrorBranch}}
-2. Find the corresponding GitLab MR and merge it (source branch {{.MirrorBranch}}, target {{.TargetBranch}}):
-     glab mr list --repo "{{.PRProject}}" --source-branch "{{.MirrorBranch}}"
-     glab mr merge <iid> --repo "{{.PRProject}}" --yes
+0. Read projects.toml in your working directory and resolve the mirror target for the source repo {{.Repo}}:
+   if an entry's github equals "{{.Repo}}", MIRROR_PROJECT is that entry's gitlab path, else MIRROR_PROJECT is "{{.Repo}}"; the mirror git URL is <default_host>/<MIRROR_PROJECT>.git. If projects.toml is missing, fall back to project "{{.PRProject}}" and URL "{{.MirrorRepoURL}}".
+1. Push the merged head to the mirror branch with the helper (safe token handling), using the resolved mirror git URL:
+     gh-pr-mirror.sh {{.PR.Number}} {{.Repo}} "<mirror git URL>" {{.MirrorBranch}}
+2. Find the corresponding GitLab MR in MIRROR_PROJECT and merge it (source branch {{.MirrorBranch}}, target {{.TargetBranch}}):
+     glab mr list --repo "<MIRROR_PROJECT>" --source-branch "{{.MirrorBranch}}"
+     glab mr merge <iid> --repo "<MIRROR_PROJECT>" --yes
    If no corresponding MR exists, create it first with glab mr create (source {{.MirrorBranch}} / target {{.TargetBranch}}), then merge.
    If GitLab cannot auto-merge due to a conflict, do not force-push — print ERROR with an explanation instead.
 

@@ -33,6 +33,10 @@ contents:
       mode: 0755
   - src: ./codex/AGENTS.md
     dst: /var/lib/ci-webhook-codex-agent/AGENTS.md
+  # GitHub -> GitLab project map Codex reads to resolve the mirror target.
+  - src: ./.reallsys/projects.toml
+    dst: /var/lib/ci-webhook-codex-agent/projects.toml
+    type: "config|noreplace"
 
   # systemd unit.
   - src: ./packaging/systemd/ci-webhook-codex-agent.service
