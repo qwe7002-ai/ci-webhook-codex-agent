@@ -117,7 +117,8 @@ const triageTmpl = `你是一個 CI / 研發事故的初步分診 (triage) agent
 
 // prReviewTmpl: review a GitHub PR (gh) and mirror it as a GitLab MR (git + glab).
 const prReviewTmpl = `你是一個 PR 審查 + 鏡像 agent。以下是一則 GitHub pull_request 事件(action={{.Action}})。
-環境已設定 GH_TOKEN(供 gh)、GITLAB_HOST / GITLAB_TOKEN(供 glab),git 可用。
+環境已設定 GH_TOKEN(供 gh)、GITLAB_HOST / GITLAB_TOKEN(供 glab),git 與 helper 腳本 gh-pr-mirror.sh 可用。
+本流程的權威規範見工作目錄的 AGENTS.md,務必遵守其中的安全規範(審查一律 comment、只推鏡像分支、不強推、不外流 token)。
 
 ## 任務 A:審查 GitHub PR 並以 comment 留下審查
 1. 取得內容與 diff:
@@ -130,20 +131,16 @@ const prReviewTmpl = `你是一個 PR 審查 + 鏡像 agent。以下是一則 Gi
 
 ## 任務 B:把這個 PR 鏡像成內網 GitLab MR
 使用穩定分支名 ` + "`{{.MirrorBranch}}`" + `(讓後續 merge 同步能對應到同一個 MR)。
-1. 取得 PR 的 head 內容(來源分支 {{.PR.HeadRef}},head repo: {{.PR.HeadRepoURL}}),
-   例如在一個乾淨工作目錄:
-     gh pr checkout {{.PR.Number}} --repo {{.Repo}}   # 或 git fetch head repo 的 {{.PR.HeadRef}}
-     git branch -f {{.MirrorBranch}} HEAD
-2. 推送到內網 GitLab mirror repo(用 token 認證,勿把 token 寫進設定或 log):
-     git remote add gitlab "$(printf '%s' '{{.MirrorRepoURL}}' | sed -E 's#^https://#https://oauth2:'"$GITLAB_TOKEN"'@#')" 2>/dev/null || true
-     git push -f gitlab {{.MirrorBranch}}
-3. 用 glab 建立對應 MR(target 分支 {{.TargetBranch}});若同來源分支的 MR 已存在則略過建立:
+1. 用 helper 推送鏡像分支(自動 shallow checkout + 安全處理 token,勿自行拼 token/URL):
+     gh-pr-mirror.sh {{.PR.Number}} {{.Repo}} "{{.MirrorRepoURL}}" {{.MirrorBranch}}
+   (成功會印出 MIRROR_PUSHED: ok;失敗會印出 ERROR:,此時直接回報 ERROR 收尾。)
+2. 幂等建立/沿用對應 MR(target 分支 {{.TargetBranch}});先查是否已存在,存在就沿用其網址:
+     glab mr list   --repo "{{.PRProject}}" --source-branch "{{.MirrorBranch}}"
      glab mr create --repo "{{.PRProject}}" \
        --source-branch "{{.MirrorBranch}}" --target-branch "{{.TargetBranch}}" \
        --title "[mirror] {{.Title}}" \
        --description "鏡像自 GitHub PR {{.URL}}(#{{.PR.Number}})。含上方審查摘要。由自動化 agent 建立。" \
        --yes
-   (先用 ` + "`glab mr list --repo \"{{.PRProject}}\" --source-branch \"{{.MirrorBranch}}\"`" + ` 檢查是否已存在。)
 
 ## 輸出(最後)
    REVIEW_POSTED: yes|no
@@ -163,14 +160,12 @@ const prReviewTmpl = `你是一個 PR 審查 + 鏡像 agent。以下是一則 Gi
 // prMergeTmpl: the GitHub PR was merged; merge the mirrored GitLab MR.
 const prMergeTmpl = `你是一個 PR 合併同步 agent。GitHub PR #{{.PR.Number}}({{.URL}})已被 **merge**
 (merge commit {{.PR.MergeSHA}})。請把這個合併同步到內網 GitLab。
-環境已設定 GH_TOKEN、GITLAB_HOST / GITLAB_TOKEN,git 可用。鏡像分支名為 ` + "`{{.MirrorBranch}}`" + `。
+環境已設定 GH_TOKEN、GITLAB_HOST / GITLAB_TOKEN,git 與 helper 腳本 gh-pr-mirror.sh 可用。鏡像分支名為 ` + "`{{.MirrorBranch}}`" + `。
+本流程的權威規範見工作目錄的 AGENTS.md,務必遵守其安全規範(遇衝突不強推、改回報 ERROR)。
 
 ## 任務
-1. 確保 GitLab mirror 的來源分支是最新(把合併後的 head 內容推到 mirror repo):
-     gh pr checkout {{.PR.Number}} --repo {{.Repo}}
-     git branch -f {{.MirrorBranch}} HEAD
-     git remote add gitlab "$(printf '%s' '{{.MirrorRepoURL}}' | sed -E 's#^https://#https://oauth2:'"$GITLAB_TOKEN"'@#')" 2>/dev/null || true
-     git push -f gitlab {{.MirrorBranch}}
+1. 用 helper 把合併後的 head 推到鏡像分支(安全處理 token):
+     gh-pr-mirror.sh {{.PR.Number}} {{.Repo}} "{{.MirrorRepoURL}}" {{.MirrorBranch}}
 2. 找到對應的 GitLab MR 並合併(來源分支 {{.MirrorBranch}},目標 {{.TargetBranch}}):
      glab mr list --repo "{{.PRProject}}" --source-branch "{{.MirrorBranch}}"
      glab mr merge <iid> --repo "{{.PRProject}}" --yes

@@ -45,7 +45,10 @@ github:
 codex:
   bin: "codex"
   model: "gpt-5-codex"     # optional; injected as the "model" tool argument. Empty = codex default.
-  workdir: "/tmp"
+  # Codex reads AGENTS.md (the skill/operating guide) from this working dir.
+  # Docker image ships it at /app/workspace/AGENTS.md; for local runs point this
+  # at the repo's ./codex directory.
+  workdir: "/app/workspace"
   timeout: "5m"
   # Codex runs as an MCP server; this agent is the MCP client (stdio JSON-RPC).
   mcp:

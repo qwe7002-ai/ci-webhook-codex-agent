@@ -42,7 +42,7 @@ func TestRender_PRReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"gh pr review", "--comment", "gh-pr-7", "team/mirror", "glab mr create"} {
+	for _, want := range []string{"gh pr review", "--comment", "gh-pr-7", "team/mirror", "glab mr create", "gh-pr-mirror.sh", "AGENTS.md"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("pr_review prompt missing %q:\n%s", want, out)
 		}
@@ -58,7 +58,7 @@ func TestRender_PRMergeSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"glab mr merge", "gh-pr-7", "MR_URL:"} {
+	for _, want := range []string{"glab mr merge", "gh-pr-7", "MR_URL:", "gh-pr-mirror.sh"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("pr_merge prompt missing %q:\n%s", want, out)
 		}

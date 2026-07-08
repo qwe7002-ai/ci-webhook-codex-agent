@@ -40,6 +40,12 @@ RUN npm install -g @openai/codex@${CODEX_VERSION} \
 COPY --from=build /out/server /usr/local/bin/server
 COPY config.example.yaml /app/config.example.yaml
 
+# Codex skill: the operating guide (AGENTS.md, auto-read from its working dir)
+# plus the vetted mirror helper on PATH.
+COPY codex/AGENTS.md /app/workspace/AGENTS.md
+COPY codex/bin/gh-pr-mirror.sh /usr/local/bin/gh-pr-mirror.sh
+RUN chmod +x /usr/local/bin/gh-pr-mirror.sh
+
 WORKDIR /app
 EXPOSE 8080
 

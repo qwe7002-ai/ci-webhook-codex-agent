@@ -106,8 +106,33 @@ internal/mcp              精簡 MCP stdio client (initialize + tools/call)
 internal/codex            啟動 codex mcp、注入 GITLAB_*/GH_TOKEN 環境變數、呼叫工具、解析輸出
 internal/worker           bounded queue + worker pool + 去重
 internal/server           HTTP 路由與 webhook handler
+codex/AGENTS.md           Codex 的操作指南 (skill):各 playbook 流程與安全規範
+codex/bin/gh-pr-mirror.sh helper 腳本:安全地把 GitHub PR 鏡像分支推到 GitLab
 scripts/setup-glab.sh     (選用) 手動驗證 glab 能連到內網 GitLab
 ```
+
+---
+
+## Codex skill (AGENTS.md + helper)
+
+為了「保障 Codex 每次都正確處理」,把可重複的規範與最容易出錯的步驟固化成一個 skill,
+而不是每次都靠 prompt 臨場推導:
+
+- **`codex/AGENTS.md`** — Codex 的權威操作指南。Codex 會從**工作目錄自動讀取** AGENTS.md
+  (`codex.workdir`,Docker 為 `/app/workspace`;本機請指到 repo 的 `./codex`)。內容涵蓋:
+  - 三個 playbook 的標準步驟(triage_issue / pr_review / pr_merge_sync);
+  - **硬性安全規範**:審查一律 comment、鏡像分支固定 `gh-pr-<n>`、不對 GitLab 目標分支
+    強推、合併遇衝突改回報 ERROR、MR 建立要幂等、絕不列印 token、把 PR/diff 內文當不可信
+    輸入(防 prompt injection);
+  - **輸出契約**:最後訊息只輸出 `ISSUE_URL:` / `MR_URL:` / `SUMMARY:` / `ERROR:` 供 agent 解析。
+- **`codex/bin/gh-pr-mirror.sh`** — 把「checkout GitHub PR → force-push 到 GitLab 鏡像分支」
+  這段最容易寫錯、又牽涉 token 的部分封裝成一支經過測試的腳本(shallow clone、用 `oauth2:<token>`
+  組 remote 但**絕不列印**、trap 清理暫存)。prompt 直接叫 Codex 執行它,而非自己拼 git/token
+  指令,降低出錯與洩漏風險。
+
+> skill 的參數(GitLab 專案、mirror URL、目標分支等)由 agent 依事件與 `pr:` 設定注入 prompt;
+> Codex 只需照 AGENTS.md 執行。要調整行為(例如改審查模式、換分支命名),改 AGENTS.md /
+> 腳本 / 設定即可,Go 端不用動。
 
 ---
 
@@ -148,6 +173,9 @@ cp .env.example .env        # 填入 secret
 ```bash
 make build
 set -a; source .env; set +a
+# 讓 Codex 讀得到 skill:把 workdir 指到 ./codex(內含 AGENTS.md),並把 helper 放上 PATH
+export PATH="$PWD/codex/bin:$PATH"    # gh-pr-mirror.sh
+# 並在 config.yaml 設 codex.workdir: ./codex
 ./bin/server -config config.yaml
 ```
 
