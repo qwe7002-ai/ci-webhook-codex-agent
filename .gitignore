@@ -1,6 +1,9 @@
 # Local secrets and config
 .env
 config.yaml
+# Auto-generated webhook secret (persisted under codex.workdir).
+.webhook-secret
+**/.webhook-secret
 # ...but the packaged default config is tracked (no secrets; uses ${VAR}).
 !packaging/config.yaml
 

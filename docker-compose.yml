@@ -7,12 +7,18 @@ services:
     environment:
       # Loaded from .env (see .env.example). These feed config.yaml's ${VAR}
       # expansion. gh/glab auth is NOT here — mount their CLI config below.
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+      # GITHUB_WEBHOOK_SECRET is optional; if empty the agent auto-generates one
+      # under codex.workdir (persist that dir — see the volume below).
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       GITLAB_HOST: ${GITLAB_HOST}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       # Provide your real config.yaml (copy from config.example.yaml).
       - ./config.yaml:/app/config.yaml:ro
+      # The webhook secret auto-generates under codex.workdir (/app/workspace),
+      # which is ephemeral here — it would change on container recreation. For a
+      # stable secret in Docker, just set GITHUB_WEBHOOK_SECRET above (and use
+      # the same value when registering the webhook).
       # gh/glab store their credentials under $HOME/.config. Authenticate on the
       # host (`gh auth login`, `glab auth login`) and mount that config in so the
       # Codex process reuses it. HOME is /root in the runtime image.
