@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
-# Optional: verify glab can reach the internal GitLab non-interactively.
-# The agent itself just sets GITLAB_HOST/GITLAB_TOKEN in Codex's environment, so
-# this script is only for manually confirming connectivity before deploying.
+# Optional: verify glab is authenticated and can reach the internal GitLab
+# non-interactively. The agent no longer injects a token — glab uses its own
+# stored credentials (`glab auth login`) — so this just confirms that login
+# worked before deploying.
 set -euo pipefail
 
 : "${GITLAB_HOST:?set GITLAB_HOST, e.g. https://gitlab.internal.corp}"
-: "${GITLAB_TOKEN:?set GITLAB_TOKEN (PAT with api scope)}"
+
+host="${GITLAB_HOST#https://}"
+host="${host#http://}"
 
 echo "Checking glab against ${GITLAB_HOST} ..."
-glab auth status --hostname "${GITLAB_HOST#https://}" || true
+if ! glab auth status --hostname "${host}"; then
+  echo
+  echo "glab is not authenticated for ${host}."
+  echo "Run: glab auth login --hostname ${host}"
+  exit 1
+fi
 
 echo
 echo "Whoami:"
 glab api user | sed 's/,/,\n/g' | grep -E '"(username|name|id)"' || true
 
 echo
-echo "OK. glab is authenticated. The agent will pass these same env vars to Codex."
+echo "OK. glab is authenticated. Codex will reuse these credentials."

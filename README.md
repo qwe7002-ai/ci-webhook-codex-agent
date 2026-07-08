@@ -89,8 +89,9 @@ issue 內文會標註「由自動化 triage agent 建立，評判僅供參考，
     GitLab 端若有衝突不會強推,改回報 `ERROR`。
 
 > 分支名 `gh-pr-<number>` 是刻意固定的:review 時建立、merge 時據此找到同一個 MR。
-> Review 模式目前固定為 comment(在 `pr.review_mode`);gh 用 `GH_TOKEN` 認證,
-> git push 到 GitLab 用 `GITLAB_TOKEN`(執行期注入 URL,不落地)。
+> Review 模式目前固定為 comment(在 `pr.review_mode`);gh / glab 各自用**自己的**登入
+> 憑證(`gh auth login` / `glab auth login`),本服務不管理任何 token;git push 到 GitLab
+> 走 glab 的 git credential helper,憑證不進 URL、不落地。
 
 ---
 
@@ -103,7 +104,7 @@ internal/github/verify.go webhook 簽章驗證 (HMAC-SHA256)
 internal/github/event.go  事件過濾 + 正規化成 Incident + 選 playbook
 internal/prompt           各 playbook 的 Codex prompt 模板 (triage / pr_review / pr_merge)
 internal/mcp              精簡 MCP stdio client (initialize + tools/call)
-internal/codex            啟動 codex mcp、注入 GITLAB_*/GH_TOKEN 環境變數、呼叫工具、解析輸出
+internal/codex            啟動 codex mcp、注入 GITLAB_HOST 環境變數、呼叫工具、解析輸出
 internal/worker           bounded queue + worker pool + 去重
 internal/server           HTTP 路由與 webhook handler
 codex/AGENTS.md           Codex 的操作指南 (skill):各 playbook 流程與安全規範
@@ -124,13 +125,13 @@ scripts/setup-glab.sh     (選用) 手動驗證 glab 能連到內網 GitLab
   **不需放在工作目錄**;若工作目錄剛好有 AGENTS.md,Codex 仍會照它預設行為一併讀取。內容涵蓋:
   - 三個 playbook 的標準步驟(triage_issue / pr_review / pr_merge_sync);
   - **硬性安全規範**:審查一律 comment、鏡像分支固定 `gh-pr-<n>`、不對 GitLab 目標分支
-    強推、合併遇衝突改回報 ERROR、MR 建立要幂等、絕不列印 token、把 PR/diff 內文當不可信
+    強推、合併遇衝突改回報 ERROR、MR 建立要幂等、絕不列印或內嵌憑證、把 PR/diff 內文當不可信
     輸入(防 prompt injection);
   - **輸出契約**:最後訊息只輸出 `ISSUE_URL:` / `MR_URL:` / `SUMMARY:` / `ERROR:` 供 agent 解析。
 - **`codex/bin/gh-pr-mirror.sh`** — 把「checkout GitHub PR → force-push 到 GitLab 鏡像分支」
-  這段最容易寫錯、又牽涉 token 的部分封裝成一支經過測試的腳本(shallow clone、用 `oauth2:<token>`
-  組 remote 但**絕不列印**、trap 清理暫存)。prompt 直接叫 Codex 執行它,而非自己拼 git/token
-  指令,降低出錯與洩漏風險。
+  這段最容易寫錯、又牽涉憑證的部分封裝成一支經過測試的腳本(shallow clone、GitHub 端用 `gh`、
+  GitLab push 用 glab 的 git credential helper,憑證**絕不進 URL 或落地**、trap 清理暫存)。
+  prompt 直接叫 Codex 執行它,而非自己拼 git 指令,降低出錯與洩漏風險。
 
 > skill 的參數(GitLab 專案、mirror URL、目標分支等)由 agent 依事件與 `pr:` 設定注入 prompt;
 > Codex 只需照 AGENTS.md 執行。要調整行為(例如改審查模式、換分支命名),改 AGENTS.md /
@@ -149,6 +150,9 @@ cp .env.example .env        # 填入 secret
 
 - 設定檔內的 `${VAR}` 會在載入時從環境變數展開，**secret 只放在環境變數**，
   不落地到設定檔。
+- **GitHub / GitLab 認證交給 CLI 自己管**:先在主機上跑一次 `gh auth login` 與
+  `glab auth login`,Codex 子行程直接沿用它們存下的憑證。本服務**不再管理任何
+  GitHub/GitLab token**,設定檔與環境變數裡也沒有。
 - 開關事件：在 `github.events` 底下增減條目、切 `enabled`、調整 `actions` /
   `conclusions`。沒列到或 `enabled: false` 的事件一律忽略。
 
@@ -156,11 +160,12 @@ cp .env.example .env        # 填入 secret
 
 | 變數 | 用途 |
 |------|------|
-| `GITHUB_WEBHOOK_SECRET` | 驗證 webhook 簽章，需與 GitHub 上設定一致 |
-| `GH_TOKEN` | GitHub token(repo scope)，供 gh 留 PR review / 取 diff。啟用 pull_request 時必填 |
-| `GITLAB_HOST` | 內網 GitLab base URL，會注入 Codex 子行程供 glab 使用 |
-| `GITLAB_TOKEN` | 具 `api` scope 的 PAT/專案 token，供 glab 建 issue / MR 與 git push |
+| `GITHUB_WEBHOOK_SECRET` | 驗證 webhook 簽章，需與 GitHub 上設定一致（本服務唯一自管的 secret） |
+| `GITLAB_HOST` | 內網 GitLab base URL，會注入 Codex 子行程,讓 glab 指向正確的 instance |
 | `OPENAI_API_KEY` | （或你的 codex 安裝所需的認證）供 Codex 推理 |
+
+> gh / glab 的登入憑證**不在**上表:它們由 `gh auth login` / `glab auth login`
+> 存進各自的 CLI 設定(`~/.config/gh`、`~/.config/glab-cli`),不經過本服務。
 
 ---
 
@@ -170,9 +175,13 @@ cp .env.example .env        # 填入 secret
 
 前置：安裝 [`codex`](https://github.com/openai/codex)、
 [`glab`](https://gitlab.com/gitlab-org/cli)、[`gh`](https://cli.github.com/) 與
-`git`，並確認機器能連到內網 GitLab(以及 GitHub,供 PR 鏡像)。
+`git`，並確認機器能連到內網 GitLab(以及 GitHub,供 PR 鏡像)。接著登入兩個 CLI
+(只需一次,憑證存在各自的設定,本服務會沿用):
 
 ```bash
+gh auth login                                   # GitHub CLI
+glab auth login --hostname gitlab.internal.corp # 內網 GitLab CLI(用你的 GITLAB_HOST)
+
 make build
 set -a; source .env; set +a
 # AGENTS.md 已 embed 進 binary 並當 system 指令傳入,workdir 不必放它。
@@ -242,18 +251,20 @@ sudo systemctl status ci-webhook-codex-agent
 
 - **簽章必驗**：所有 webhook 都先驗 `X-Hub-Signature-256` 才處理內容；raw body
   在任何再編碼前先驗，用 constant-time 比較。
-- **Secret 不落地**：token 走環境變數，設定檔只留 `${VAR}` 佔位。
+- **Secret 不落地**：設定檔只留 `${VAR}` 佔位;本服務唯一自管的 secret 是
+  `GITHUB_WEBHOOK_SECRET`(走環境變數)。GitHub / GitLab 憑證交給 `gh` / `glab`
+  各自保管,不經過本服務的設定檔或環境變數。
 - **Codex sandbox**：Codex 需要能跑 shell（`glab` / `gh` / `git`）並連到內網
   GitLab 與 GitHub，範例把 `codex.mcp.arguments` 設為 `sandbox:
   danger-full-access` + `approval-policy: never`（透過 MCP 工具參數傳入）。這代表
   Codex 在該容器內可執行任意指令，請務必：
   - 跑在**隔離、最小權限**的容器/主機，只給它到 GitLab / GitHub / model API 的網路；
-  - `GITLAB_TOKEN` 只給必要專案與 `api` scope;`GH_TOKEN` 只給必要 repo 的最小 scope
-    (PR review + 讀取);
+  - `gh` / `glab` 登入時用**最小權限**憑證:glab 只給必要專案與 `api` scope、
+    gh 只給必要 repo 的最小 scope(PR review + 讀取);
   - 有需要可改成 `workspace-write` + 限制網路。
 - **PR 鏡像**：`pr_review` / `pr_merge_sync` 會 `git push` 到內網 GitLab 並可能
-  `glab mr merge`。請確認 mirror 專案是**專用鏡像 repo**(而非正式主幹),並用最小權限
-  token,避免自動化誤動到生產分支。merge sync 遇 GitLab 端衝突時刻意不強推、改回報錯。
+  `glab mr merge`。請確認 mirror 專案是**專用鏡像 repo**(而非正式主幹),並讓 glab 用最小權限
+  憑證登入,避免自動化誤動到生產分支。merge sync 遇 GitLab 端衝突時刻意不強推、改回報錯。
 - **MCP 交握**：本 agent 不實作 server→client 的請求（sampling / elicitation
   等),收到就回 `method not supported` 拒絕。搭配 `approval-policy: never`,正常
   流程不會走到這條路;若你改了 approval 政策而 Codex 需要人工核准,工具呼叫會因為

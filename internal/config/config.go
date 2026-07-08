@@ -1,6 +1,7 @@
 // Package config loads runtime configuration from a YAML file. Secrets are kept
 // out of the file: any ${VAR} in the YAML is expanded from the process
-// environment at load time, so tokens live in env vars, not on disk.
+// environment at load time. The only secret the agent itself handles is the
+// webhook secret; gh/glab authenticate from their own CLI config.
 package config
 
 import (
@@ -32,11 +33,6 @@ type GitHubConfig struct {
 	// WebhookSecret is the shared secret configured on the GitHub webhook.
 	// Used to verify the X-Hub-Signature-256 header. Provide via ${GITHUB_WEBHOOK_SECRET}.
 	WebhookSecret string `yaml:"webhook_secret"`
-
-	// Token is a GitHub token (repo scope) exported to the Codex process as
-	// GH_TOKEN/GITHUB_TOKEN so `gh` can post PR reviews and fetch PR diffs.
-	// Required when the pull_request event is enabled. Provide via ${GH_TOKEN}.
-	Token string `yaml:"token"`
 
 	// Events maps a GitHub event name (the X-GitHub-Event header value, e.g.
 	// "issues", "pull_request", "push", "workflow_run", "check_run") to a filter.
@@ -89,11 +85,12 @@ type MCPConfig struct {
 	Arguments map[string]any `yaml:"arguments"`
 }
 
-// GitLabConfig is passed through to glab (which Codex calls). Host and Token are
-// exported into the Codex process environment as GITLAB_HOST / GITLAB_TOKEN.
+// GitLabConfig is passed through to glab (which Codex calls). Host is exported
+// into the Codex process environment as GITLAB_HOST so glab targets the right
+// instance for repo-less commands; glab supplies its own credentials from
+// `glab auth login`, so no token lives here.
 type GitLabConfig struct {
 	Host    string `yaml:"host"`    // internal GitLab base URL, e.g. https://gitlab.internal
-	Token   string `yaml:"token"`   // personal/project access token; provide via ${GITLAB_TOKEN}
 	Project string `yaml:"project"` // target project path for issues, e.g. "team/incidents"
 }
 
@@ -108,8 +105,8 @@ type PRConfig struct {
 	// e.g. "team/web-mirror".
 	GitLabProject string `yaml:"gitlab_project"`
 	// GitLabRepoURL is the git URL Codex pushes PR branches to (the mirror repo).
-	// e.g. "https://gitlab.internal.corp/team/web-mirror.git". Codex injects the
-	// token for auth; do not embed credentials here.
+	// e.g. "https://gitlab.internal.corp/team/web-mirror.git". The push is
+	// authenticated by glab's git credential helper; do not embed credentials here.
 	GitLabRepoURL string `yaml:"gitlab_repo_url"`
 	// TargetBranch is the base branch for mirrored MRs / merge sync. Default "main".
 	TargetBranch string `yaml:"target_branch"`
@@ -195,11 +192,10 @@ func (c *Config) validate() error {
 	if c.PR.TargetBranch == "" {
 		c.PR.TargetBranch = "main"
 	}
-	// The pull_request playbooks need gh auth and a mirror target.
+	// The pull_request playbooks need a mirror target. gh/glab supply their own
+	// auth (from `gh auth login` / `glab auth login`), so nothing token-related
+	// is validated here.
 	if f, ok := c.GitHub.Events["pull_request"]; ok && f.Enabled {
-		if c.GitHub.Token == "" {
-			return fmt.Errorf("github.token is required when pull_request is enabled (set GH_TOKEN)")
-		}
 		if c.PR.GitLabProject == "" || c.PR.GitLabRepoURL == "" {
 			return fmt.Errorf("pr.gitlab_project and pr.gitlab_repo_url are required when pull_request is enabled")
 		}

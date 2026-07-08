@@ -11,7 +11,7 @@ Group=ci-webhook-codex-agent
 # HOME is needed by codex/glab/gh for their config/cache.
 Environment=HOME=/var/lib/ci-webhook-codex-agent
 WorkingDirectory=/var/lib/ci-webhook-codex-agent
-# Secrets (GITHUB_WEBHOOK_SECRET, GH_TOKEN, GITLAB_HOST, GITLAB_TOKEN, ...).
+# Env (GITHUB_WEBHOOK_SECRET, GITLAB_HOST, ...). gh/glab auth lives in HOME.
 EnvironmentFile=/etc/ci-webhook-codex-agent/agent.env
 ExecStart=/usr/bin/ci-webhook-codex-agent -config /etc/ci-webhook-codex-agent/config.yaml
 Restart=on-failure

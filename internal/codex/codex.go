@@ -44,8 +44,9 @@ func (r *Result) Link() string {
 }
 
 // Run renders the prompt, opens an MCP session to Codex, calls the tool, and
-// parses the result. The GitLab host/token are injected into the `codex mcp`
-// child environment so glab (called by Codex) authenticates without a login.
+// parses the result. Only GITLAB_HOST is injected into the `codex mcp` child
+// environment (so glab targets the right instance); gh/glab supply their own
+// credentials from their CLI config.
 func (r *Runner) Run(ctx context.Context, inc github.Incident) (*Result, error) {
 	promptText, err := prompt.Render(inc, r.cfg)
 	if err != nil {
@@ -104,18 +105,13 @@ func (r *Runner) toolArgs(promptText string) map[string]any {
 }
 
 // childEnv builds the environment for the Codex process: inherit the parent's,
-// then overlay GitLab connection vars consumed by glab.
+// then point glab at the right instance. Credentials are not injected here —
+// gh and glab read their own auth from their CLI config (`gh auth login` /
+// `glab auth login`), so the agent no longer manages any GitHub/GitLab token.
 func (r *Runner) childEnv() []string {
 	env := os.Environ()
 	if r.cfg.GitLab.Host != "" {
 		env = append(env, "GITLAB_HOST="+r.cfg.GitLab.Host)
-	}
-	if r.cfg.GitLab.Token != "" {
-		env = append(env, "GITLAB_TOKEN="+r.cfg.GitLab.Token)
-	}
-	// gh (PR review/fetch) reads GH_TOKEN or GITHUB_TOKEN; set both.
-	if r.cfg.GitHub.Token != "" {
-		env = append(env, "GH_TOKEN="+r.cfg.GitHub.Token, "GITHUB_TOKEN="+r.cfg.GitHub.Token)
 	}
 	return env
 }

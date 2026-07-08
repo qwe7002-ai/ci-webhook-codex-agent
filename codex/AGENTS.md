@@ -7,10 +7,12 @@ single normalized GitHub event and asks you to run one of the playbooks below. T
 
 ## Environment
 - Available tools: `glab` (GitLab CLI), `gh` (GitHub CLI), `git`, standard shell.
-- Auth (already in environment variables; **never** print them or write them to files/logs):
-  - `GH_TOKEN` / `GITHUB_TOKEN` → `gh` and git operations against GitHub.
-  - `GITLAB_TOKEN` + `GITLAB_HOST` → `glab` and git push against GitLab.
-- Helper script (already on PATH): `gh-pr-mirror.sh` (safely pushes a GitHub PR's mirror branch to GitLab).
+- Auth: `gh` and `glab` are already logged in and hold their own credentials — just run them,
+  no token handling on your part. `GITLAB_HOST` points glab at the internal instance. **Never**
+  print, echo, or write any credential to files/logs, and never construct an authenticated
+  (token-in-URL) git remote yourself.
+- Helper script (already on PATH): `gh-pr-mirror.sh` (safely pushes a GitHub PR's mirror branch to
+  GitLab using glab's git credential helper).
 
 ## Resolving the target GitLab project (`<PROJECT>` / `<MIRROR_PROJECT>` / mirror URL)
 The internal GitLab project that corresponds to a GitHub repo is looked up in `projects.toml`, which
@@ -39,7 +41,8 @@ unreadable, fall back to the project/URL given in the prompt.
    explanation — do not force and do not rewrite history.
 6. **MR creation must be idempotent**: first check whether an MR already exists for the same source
    branch; if so, reuse it instead of creating a duplicate.
-7. **Never print a token.** Any git remote that needs auth is always handled by `gh-pr-mirror.sh`.
+7. **Never print or embed a credential.** gh/glab authenticate themselves; any git remote that
+   needs auth is always handled by `gh-pr-mirror.sh` (it uses glab's git credential helper).
 8. **Retry at most once.** If it still fails, finish by printing `ERROR:`.
 
 ## Output contract (the final message of each call)
@@ -81,7 +84,7 @@ ERROR:          <failure reason>                # on failure, replaces the URL l
    `gh pr diff <url>`.
 2. Do an initial review (correctness / bugs / tests / risk / readability) and post it as a comment:
    `gh pr review <url> --comment --body "<Markdown review; note at the end it is auto-generated and advisory only>"`.
-3. Push the mirror branch (handles the token safely):
+3. Push the mirror branch (handles auth via glab's credential helper):
    ```
    gh-pr-mirror.sh <PR number> <github owner/repo> "<GitLab mirror git URL>" gh-pr-<PR number>
    ```

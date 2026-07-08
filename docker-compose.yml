@@ -6,15 +6,18 @@ services:
       - "8080:8080"
     environment:
       # Loaded from .env (see .env.example). These feed config.yaml's ${VAR}
-      # expansion and glab's auth inside the Codex process.
+      # expansion. gh/glab auth is NOT here — mount their CLI config below.
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
-      GH_TOKEN: ${GH_TOKEN:-}
       GITLAB_HOST: ${GITLAB_HOST}
-      GITLAB_TOKEN: ${GITLAB_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       # Provide your real config.yaml (copy from config.example.yaml).
       - ./config.yaml:/app/config.yaml:ro
+      # gh/glab store their credentials under $HOME/.config. Authenticate on the
+      # host (`gh auth login`, `glab auth login`) and mount that config in so the
+      # Codex process reuses it. HOME is /root in the runtime image.
+      - ~/.config/gh:/root/.config/gh:ro
+      - ~/.config/glab-cli:/root/.config/glab-cli:ro
     restart: unless-stopped
     # The agent must reach the internal GitLab. If GitLab is only on a private
     # network, attach that network here instead of the default bridge.
