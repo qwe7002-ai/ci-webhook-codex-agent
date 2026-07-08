@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	codexskill "github.com/qwe7002-ai/ci-webhook-codex-agent/codex"
 	"github.com/qwe7002-ai/ci-webhook-codex-agent/internal/config"
 	"github.com/qwe7002-ai/ci-webhook-codex-agent/internal/github"
 	"github.com/qwe7002-ai/ci-webhook-codex-agent/internal/mcp"
@@ -85,11 +86,17 @@ func (r *Runner) Run(ctx context.Context, inc github.Incident) (*Result, error) 
 // toolArgs builds the tool-call arguments: the configured static arguments,
 // plus the prompt (under the configured key) and optional model override.
 func (r *Runner) toolArgs(promptText string) map[string]any {
-	args := make(map[string]any, len(r.cfg.Codex.MCP.Arguments)+2)
+	args := make(map[string]any, len(r.cfg.Codex.MCP.Arguments)+3)
 	for k, v := range r.cfg.Codex.MCP.Arguments {
 		args[k] = v
 	}
 	args[r.cfg.Codex.MCP.PromptKey] = promptText
+	// Pass the operating guide (AGENTS.md) as the call's system/base instructions
+	// instead of relying on Codex reading it from the working directory. If a
+	// workdir AGENTS.md exists, Codex still reads it on top of this.
+	if key := r.cfg.Codex.MCP.SystemKey; key != "" {
+		args[key] = codexskill.AgentsMD
+	}
 	if r.cfg.Codex.Model != "" {
 		args["model"] = r.cfg.Codex.Model
 	}

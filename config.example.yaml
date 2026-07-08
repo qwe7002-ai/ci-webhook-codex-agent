@@ -45,9 +45,10 @@ github:
 codex:
   bin: "codex"
   model: "gpt-5-codex"     # optional; injected as the "model" tool argument. Empty = codex default.
-  # Codex reads AGENTS.md (the skill/operating guide) from this working dir.
-  # Docker image ships it at /app/workspace/AGENTS.md; for local runs point this
-  # at the repo's ./codex directory.
+  # Working dir for the codex mcp process. The operating guide (AGENTS.md) is
+  # compiled into this server and passed as the system_key argument below, so it
+  # need NOT live here; Codex still reads projects.toml from this dir at runtime
+  # (Docker ships it at /app/workspace/projects.toml).
   workdir: "/app/workspace"
   timeout: "5m"
   # Codex runs as an MCP server; this agent is the MCP client (stdio JSON-RPC).
@@ -55,6 +56,10 @@ codex:
     args: ["mcp"]          # how to launch codex as an MCP server over stdio
     tool_name: "codex"     # the tool this agent calls
     prompt_key: "prompt"   # tool argument the rendered prompt goes into
+    # Tool argument the embedded AGENTS.md is passed in as (the Codex tool's base/
+    # system instructions). Version-dependent name; empty disables and falls back
+    # to Codex reading AGENTS.md from the working dir instead.
+    system_key: "base-instructions"
     # Static tool-call arguments merged into every call. sandbox/approval let
     # Codex run glab (needs shell + network to the internal GitLab). Tighten to
     # taste; see README "Security". Argument names track your codex version's

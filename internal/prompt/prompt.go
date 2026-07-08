@@ -73,9 +73,9 @@ var templates = map[string]*template.Template{
 }
 
 // The per-call prompts are deliberately thin: the full procedure, safety rules,
-// projects.toml resolution, and output contract live once in AGENTS.md, which
-// Codex always reads from its working directory (the global prompt). Each prompt
-// only names the playbook and supplies the event data and runtime parameters.
+// projects.toml resolution, and output contract live once in AGENTS.md, which is
+// passed to Codex as the call's system instructions (the global prompt). Each
+// prompt only names the playbook and supplies the event data and runtime params.
 
 // triageTmpl: evaluate the event and open a GitLab issue (issues/CI/push/...).
 const triageTmpl = `Run the triage_issue playbook from AGENTS.md for the GitHub event below.

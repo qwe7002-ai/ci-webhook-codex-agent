@@ -118,8 +118,9 @@ scripts/setup-glab.sh     (選用) 手動驗證 glab 能連到內網 GitLab
 為了「保障 Codex 每次都正確處理」,把可重複的規範與最容易出錯的步驟固化成一個 skill,
 而不是每次都靠 prompt 臨場推導:
 
-- **`codex/AGENTS.md`** — Codex 的權威操作指南。Codex 會從**工作目錄自動讀取** AGENTS.md
-  (`codex.workdir`,Docker 為 `/app/workspace`;本機請指到 repo 的 `./codex`)。內容涵蓋:
+- **`codex/AGENTS.md`** — Codex 的權威操作指南。它會被 **embed 進 server binary**,並在每次 MCP
+  呼叫時當成 **system 指令**(`codex.mcp.system_key`,預設 `base-instructions`)傳給 Codex,因此
+  **不需放在工作目錄**;若工作目錄剛好有 AGENTS.md,Codex 仍會照它預設行為一併讀取。內容涵蓋:
   - 三個 playbook 的標準步驟(triage_issue / pr_review / pr_merge_sync);
   - **硬性安全規範**:審查一律 comment、鏡像分支固定 `gh-pr-<n>`、不對 GitLab 目標分支
     強推、合併遇衝突改回報 ERROR、MR 建立要幂等、絕不列印 token、把 PR/diff 內文當不可信
@@ -173,9 +174,10 @@ cp .env.example .env        # 填入 secret
 ```bash
 make build
 set -a; source .env; set +a
-# 讓 Codex 讀得到 skill:把 workdir 指到 ./codex(內含 AGENTS.md),並把 helper 放上 PATH
+# AGENTS.md 已 embed 進 binary 並當 system 指令傳入,workdir 不必放它。
+# 讓 helper 上 PATH,並把 workdir 指到含 projects.toml 的目錄(本機可用 ./.reallsys)。
 export PATH="$PWD/codex/bin:$PATH"    # gh-pr-mirror.sh
-# 並在 config.yaml 設 codex.workdir: ./codex
+# 並在 config.yaml 設 codex.workdir: ./.reallsys(讓 Codex 讀得到 projects.toml)
 ./bin/server -config config.yaml
 ```
 
@@ -201,8 +203,8 @@ docker compose up --build
 
 `release-deb` workflow 會建置 `.deb`(amd64 / arm64)並發佈成 apt repo 到
 **GitHub Pages**。安裝後會帶一個 systemd service、預設設定於
-`/etc/ci-webhook-codex-agent/`、skill(AGENTS.md + helper)於
-`/var/lib/ci-webhook-codex-agent` 與 `/usr/bin`。
+`/etc/ci-webhook-codex-agent/`、`projects.toml` 於 `/var/lib/ci-webhook-codex-agent`、
+helper 於 `/usr/bin`(AGENTS.md 已 embed 進 binary,不另外安裝)。
 
 **發佈(維護者)**:
 1. 一次性:repo → Settings → Pages → Source 選 **GitHub Actions**。

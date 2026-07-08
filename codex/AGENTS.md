@@ -14,8 +14,8 @@ single normalized GitHub event and asks you to run one of the playbooks below. T
 
 ## Resolving the target GitLab project (`<PROJECT>` / `<MIRROR_PROJECT>` / mirror URL)
 The internal GitLab project that corresponds to a GitHub repo is looked up in `projects.toml`, which
-sits in your working directory next to this file. **Every playbook first reads `projects.toml` and
-resolves the target from the event's source repo (`<owner>/<repo>`):**
+sits in your working directory. **Every playbook first reads `projects.toml` and resolves the target
+from the event's source repo (`<owner>/<repo>`):**
 1. If an entry's `github` equals the source repo, the target project is that entry's `gitlab` path.
 2. Otherwise the target project is the same `<owner>/<repo>`.
 3. The mirror git URL is always `<default_host>/<target project>.git` (`default_host` comes from
