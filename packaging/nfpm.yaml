@@ -26,13 +26,17 @@ contents:
     file_info:
       mode: 0755
 
-  # Codex skill: helper on PATH + operating guide in the service working dir.
+  # Codex skill: helper on PATH. The operating guide (AGENTS.md) is compiled into
+  # the server binary and passed as the MCP system instructions, so it is not
+  # installed into the working directory.
   - src: ./codex/bin/gh-pr-mirror.sh
     dst: /usr/bin/gh-pr-mirror.sh
     file_info:
       mode: 0755
-  - src: ./codex/AGENTS.md
-    dst: /var/lib/ci-webhook-codex-agent/AGENTS.md
+  # GitHub -> GitLab project map Codex reads to resolve the target project.
+  - src: ./.reallsys/projects.toml
+    dst: /var/lib/ci-webhook-codex-agent/projects.toml
+    type: "config|noreplace"
 
   # systemd unit.
   - src: ./packaging/systemd/ci-webhook-codex-agent.service

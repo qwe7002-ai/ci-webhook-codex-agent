@@ -57,6 +57,10 @@ jobs:
       - name: Configure Pages
         id: pages
         uses: actions/configure-pages@v5
+        with:
+          # Enable GitHub Pages (Actions source) via the API on first run so the
+          # workflow doesn't fail when Pages hasn't been turned on manually yet.
+          enablement: true
 
       - name: Build binaries and .deb packages
         env:

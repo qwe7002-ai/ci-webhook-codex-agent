@@ -13,3 +13,7 @@ config.yaml
 # Go
 *.test
 *.out
+
+# Python bytecode
+__pycache__/
+*.pyc
