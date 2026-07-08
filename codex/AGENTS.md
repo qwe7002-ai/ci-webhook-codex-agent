@@ -33,10 +33,11 @@ single normalized GitHub event and asks you to run one of the playbooks below. T
 Print only whichever of the following lines apply (the agent parses these lines); put any other
 explanation before these lines:
 ```
-ISSUE_URL: <URL of the created GitLab issue>   # triage_issue
-MR_URL:    <URL of the created/merged GitLab MR>  # pr_review / pr_merge_sync
-SUMMARY:   <one-sentence summary>
-ERROR:     <failure reason>                    # on failure, replaces the URL lines above
+ISSUE_URL:      <URL of the created GitLab issue>   # triage_issue
+GITHUB_COMMENT: <URL of the reply on the source GitHub issue, or "failed"/"skipped">  # triage_issue
+MR_URL:         <URL of the created/merged GitLab MR>  # pr_review / pr_merge_sync
+SUMMARY:        <one-sentence summary>
+ERROR:          <failure reason>                # on failure, replaces the URL lines above
 ```
 
 ---
@@ -50,7 +51,13 @@ ERROR:     <failure reason>                    # on failure, replaces the URL li
      --description "<assessment, next steps, link to the original event; note at the end that this was created automatically and is advisory only>" \
      --label "triage,<category>,severity::<Sx>,priority::<Px>" --yes
    ```
-3. Print `ISSUE_URL:` and `SUMMARY:`.
+3. **If the source event is a GitHub issue**, reply on it so the reporter knows it was forwarded and
+   triaged (skip this for CI / push / other events, which have no issue to comment on):
+   ```
+   gh issue comment "<GitHub issue URL>" --body "<forwarded to the internal tracker and triaged; include the GitLab issue URL and a one-line assessment; note it is automated>"
+   ```
+   If the comment fails, do not abort — still report `ISSUE_URL:` and set `GITHUB_COMMENT: failed`.
+4. Print `ISSUE_URL:`, `GITHUB_COMMENT:` (the comment URL, or `skipped` when not a GitHub issue), and `SUMMARY:`.
 
 ## Playbook: pr_review (PR opened / reopened)
 1. Fetch content: `gh pr view <url> --json title,body,author,files,additions,deletions` and

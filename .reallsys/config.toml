@@ -1,4 +1,0 @@
-# 內網 GitLab 位址。
-# GitHub repo 的 <owner>/<repo> 原樣保留,只把 host 換成這個。
-# 例:github.com/telegram-sms/telegram-sms -> git.reall.us/telegram-sms/telegram-sms
-gitlab_host = "https://git.reall.us"

@@ -22,6 +22,7 @@ type view struct {
 	ReviewMode    string   // gh review mode (comment)
 	MirrorBranch  string   // stable GitLab source branch for this PR
 	ExtraLines    []string // formatted Extra map, for triage
+	IsGitHubIssue bool     // event is a GitHub issue → we can reply back on it
 }
 
 // Render builds the Codex prompt for one incident based on its playbook.
@@ -34,6 +35,7 @@ func Render(inc github.Incident, cfg *config.Config) (string, error) {
 		TargetBranch:  cfg.PR.TargetBranch,
 		ReviewMode:    cfg.PR.ReviewMode,
 		ExtraLines:    formatExtra(inc.Extra),
+		IsGitHubIssue: inc.EventType == "issues",
 	}
 	if inc.PR != nil {
 		// Stable, matchable source branch so merge-sync can find the same MR.
@@ -95,11 +97,26 @@ const triageTmpl = `You are a preliminary triage agent for CI / engineering inci
    The issue body should include: the preliminary evaluation (bulleted), the next-steps, and the
    original event (GitHub link and key fields), with a note at the end that "this issue was created by
    an automated triage agent; the evaluation is advisory only and needs human confirmation".
+{{- if .IsGitHubIssue}}
+
+3. Reply on the original GitHub issue so the reporter knows it was forwarded and triaged. Post one
+   comment with gh (GH_TOKEN is set), linking the internal GitLab issue you just created:
+     gh issue comment "{{.URL}}" --body "<short note: forwarded to the internal tracker and triaged; include the GitLab issue URL from step 2 and the one-line assessment; note it is automated>"
+   If the comment fails, do not abort the whole run — still report the ISSUE_URL below and set
+   GITHUB_COMMENT to "failed".
+
+4. On success, print:
+   ISSUE_URL: <issue URL returned by glab>
+   GITHUB_COMMENT: <URL of the GitHub issue comment, or "failed">
+   SUMMARY: <one-sentence summary of your evaluation>
+   On failure, print ERROR: <reason>, and do not retry more than once.
+{{- else}}
 
 3. On success, print two lines:
    ISSUE_URL: <issue URL returned by glab>
    SUMMARY: <one-sentence summary of your evaluation>
    On failure, print ERROR: <reason>, and do not retry more than once.
+{{- end}}
 
 ## Event info
 - event: {{.EventType}}{{if .Action}} / {{.Action}}{{end}}

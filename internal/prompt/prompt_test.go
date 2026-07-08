@@ -21,7 +21,7 @@ func cfg() *config.Config {
 }
 
 func TestRender_Triage(t *testing.T) {
-	inc := github.Incident{Playbook: github.PlaybookTriageIssue, Repo: "o/r", Title: "boom",
+	inc := github.Incident{Playbook: github.PlaybookTriageIssue, EventType: "workflow_run", Repo: "o/r", Title: "boom",
 		Extra: map[string]string{"conclusion": "failure"}}
 	out, err := Render(inc, cfg())
 	if err != nil {
@@ -29,6 +29,24 @@ func TestRender_Triage(t *testing.T) {
 	}
 	if !strings.Contains(out, "glab issue create") || !strings.Contains(out, "team/incidents") {
 		t.Fatalf("triage prompt missing expected content:\n%s", out)
+	}
+	// A CI event has no GitHub issue to reply to.
+	if strings.Contains(out, "gh issue comment") {
+		t.Fatalf("non-issue triage should not include a GitHub reply step:\n%s", out)
+	}
+}
+
+func TestRender_TriageIssueRepliesBack(t *testing.T) {
+	inc := github.Incident{Playbook: github.PlaybookTriageIssue, EventType: "issues", Repo: "o/r",
+		Title: "[GitHub issue #5] boom", URL: "https://github.com/o/r/issues/5"}
+	out, err := Render(inc, cfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"gh issue comment", "https://github.com/o/r/issues/5", "GITHUB_COMMENT:"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("issue triage prompt missing %q:\n%s", want, out)
+		}
 	}
 }
 
