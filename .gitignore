@@ -1,6 +1,8 @@
 # Local secrets and config
 .env
 config.yaml
+# ...but the packaged default config is tracked (no secrets; uses ${VAR}).
+!packaging/config.yaml
 
 # Build output
 /bin/
