@@ -78,9 +78,11 @@ type MCPConfig struct {
 	// PromptKey is the tool argument the rendered prompt is placed into.
 	PromptKey string `yaml:"prompt_key"`
 	// SystemKey is the tool argument the embedded operating guide (AGENTS.md) is
-	// placed into — the Codex tool's base/system instructions parameter (e.g.
-	// "base-instructions"). This passes the guide via the call instead of relying
-	// on Codex reading AGENTS.md from the working directory. Empty disables it.
+	// placed into. Default "developer-instructions": the Codex tool injects it as
+	// a developer-role message layered on top of Codex's own base instructions
+	// (unlike "base-instructions", which would replace them). This passes the
+	// guide via the call instead of relying on Codex reading AGENTS.md from the
+	// working directory. Empty disables it.
 	SystemKey string `yaml:"system_key"`
 	// Arguments are static tool-call arguments merged into every call
 	// (e.g. sandbox: danger-full-access, approval-policy: never).
@@ -154,7 +156,7 @@ func Default() *Config {
 				Args:      []string{"mcp"},
 				ToolName:  "codex",
 				PromptKey: "prompt",
-				SystemKey: "base-instructions",
+				SystemKey: "developer-instructions",
 			},
 		},
 		Worker: WorkerConfig{Concurrency: 2, QueueSize: 100},

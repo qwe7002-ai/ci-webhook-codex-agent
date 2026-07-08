@@ -56,10 +56,11 @@ codex:
     args: ["mcp"]          # how to launch codex as an MCP server over stdio
     tool_name: "codex"     # the tool this agent calls
     prompt_key: "prompt"   # tool argument the rendered prompt goes into
-    # Tool argument the embedded AGENTS.md is passed in as (the Codex tool's base/
-    # system instructions). Version-dependent name; empty disables and falls back
-    # to Codex reading AGENTS.md from the working dir instead.
-    system_key: "base-instructions"
+    # Tool argument the embedded AGENTS.md is passed in as. "developer-instructions"
+    # layers it on as a developer-role message (over Codex's own base instructions);
+    # "base-instructions" would replace them instead. Version-dependent name; empty
+    # disables and falls back to Codex reading AGENTS.md from the working dir.
+    system_key: "developer-instructions"
     # Static tool-call arguments merged into every call. sandbox/approval let
     # Codex run glab (needs shell + network to the internal GitLab). Tighten to
     # taste; see README "Security". Argument names track your codex version's

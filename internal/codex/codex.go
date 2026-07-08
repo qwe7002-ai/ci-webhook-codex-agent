@@ -91,7 +91,7 @@ func (r *Runner) toolArgs(promptText string) map[string]any {
 		args[k] = v
 	}
 	args[r.cfg.Codex.MCP.PromptKey] = promptText
-	// Pass the operating guide (AGENTS.md) as the call's system/base instructions
+	// Pass the operating guide (AGENTS.md) as the call's developer instructions
 	// instead of relying on Codex reading it from the working directory. If a
 	// workdir AGENTS.md exists, Codex still reads it on top of this.
 	if key := r.cfg.Codex.MCP.SystemKey; key != "" {
