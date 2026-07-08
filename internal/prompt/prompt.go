@@ -1,6 +1,7 @@
 // Package prompt renders the instruction sent to Codex, choosing a template per
 // incident playbook. Codex runs non-interactively with `glab`, `gh`, and `git`
-// available and GITLAB_HOST / GITLAB_TOKEN / GH_TOKEN set in its environment.
+// available; gh/glab authenticate from their own CLI config and GITLAB_HOST is
+// set in the environment so glab targets the internal instance.
 package prompt
 
 import (

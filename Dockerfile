@@ -52,6 +52,8 @@ WORKDIR /app
 EXPOSE 8080
 
 # Provide config.yaml (mount or bake) plus GITHUB_WEBHOOK_SECRET, GITLAB_HOST,
-# GITLAB_TOKEN, and Codex auth (e.g. OPENAI_API_KEY) via the environment.
+# and Codex auth (e.g. OPENAI_API_KEY) via the environment. gh/glab credentials
+# are NOT baked in: mount authenticated ~/.config/gh and ~/.config/glab-cli
+# (see docker-compose.yml) so Codex reuses them.
 ENTRYPOINT ["/usr/local/bin/server"]
 CMD ["-config", "/app/config.yaml"]

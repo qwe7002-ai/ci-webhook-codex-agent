@@ -41,9 +41,13 @@ Next steps:
        codex  https://github.com/openai/codex
        glab   https://gitlab.com/gitlab-org/cli
        gh     https://cli.github.com/
-  2. Edit /etc/ci-webhook-codex-agent/config.yaml  (events, gitlab, pr.*)
-  3. Fill secrets in /etc/ci-webhook-codex-agent/agent.env
-  4. Start it:
+  2. Authenticate gh and glab AS THE SERVICE USER so Codex reuses their
+     credentials (HOME=/var/lib/ci-webhook-codex-agent):
+       sudo -u ci-webhook-codex-agent -H gh auth login
+       sudo -u ci-webhook-codex-agent -H glab auth login --hostname gitlab.internal.corp
+  3. Edit /etc/ci-webhook-codex-agent/config.yaml  (events, gitlab, pr.*)
+  4. Fill /etc/ci-webhook-codex-agent/agent.env    (webhook secret, GITLAB_HOST)
+  5. Start it:
        systemctl start ci-webhook-codex-agent
        systemctl status ci-webhook-codex-agent
 
