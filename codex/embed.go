@@ -1,5 +1,5 @@
 // Package codexskill embeds the Codex operating guide (AGENTS.md) into the
-// binary so it can be passed to Codex as the MCP call's system / base-instructions
+// binary so it can be passed to Codex as the MCP call's developer-instructions
 // argument, rather than being read from the working directory.
 package codexskill
 

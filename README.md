@@ -119,7 +119,8 @@ scripts/setup-glab.sh     (選用) 手動驗證 glab 能連到內網 GitLab
 而不是每次都靠 prompt 臨場推導:
 
 - **`codex/AGENTS.md`** — Codex 的權威操作指南。它會被 **embed 進 server binary**,並在每次 MCP
-  呼叫時當成 **system 指令**(`codex.mcp.system_key`,預設 `base-instructions`)傳給 Codex,因此
+  呼叫時當成 **developer 指令**(`codex.mcp.system_key`,預設 `developer-instructions`,疊在 Codex
+  自身的 base instructions 之上而非取代)傳給 Codex,因此
   **不需放在工作目錄**;若工作目錄剛好有 AGENTS.md,Codex 仍會照它預設行為一併讀取。內容涵蓋:
   - 三個 playbook 的標準步驟(triage_issue / pr_review / pr_merge_sync);
   - **硬性安全規範**:審查一律 comment、鏡像分支固定 `gh-pr-<n>`、不對 GitLab 目標分支

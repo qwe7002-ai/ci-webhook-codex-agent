@@ -121,6 +121,11 @@ jobs:
 
   deploy:
     needs: build
+    # Publish the apt repo to Pages only from the default branch or a version tag.
+    # The github-pages environment restricts deployments to those refs, so runs
+    # from other branches (e.g. manual test runs) build the .deb but skip deploy
+    # instead of failing at the environment gate.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment:
       name: github-pages

@@ -1,6 +1,8 @@
-# ci-webhook-codex-agent configuration.
-# Copy to config.yaml and adjust. ${VAR} is expanded from the environment at
-# load time, so keep secrets in env vars (see .env.example), not in this file.
+# ci-webhook-codex-agent configuration (Debian package default).
+# Installed to /etc/ci-webhook-codex-agent/config.yaml (config|noreplace: your
+# edits survive upgrades). ${VAR} is expanded from the environment at load time;
+# secrets live in /etc/ci-webhook-codex-agent/agent.env (loaded by the systemd
+# unit), not in this file.
 
 server:
   addr: ":8080"        # listen address
@@ -8,7 +10,7 @@ server:
 
 github:
   # Shared secret configured on the GitHub webhook (Settings -> Webhooks).
-  # Used to verify X-Hub-Signature-256. REQUIRED.
+  # Used to verify X-Hub-Signature-256. REQUIRED (set in agent.env).
   webhook_secret: "${GITHUB_WEBHOOK_SECRET}"
 
   # GitHub token (repo scope) for gh: posting PR reviews and fetching PR diffs.
@@ -45,11 +47,12 @@ github:
 codex:
   bin: "codex"
   model: "gpt-5-codex"     # optional; injected as the "model" tool argument. Empty = codex default.
-  # Working dir for the codex mcp process. The operating guide (AGENTS.md) is
-  # compiled into this server and passed as the system_key argument below, so it
-  # need NOT live here; Codex still reads projects.toml from this dir at runtime
-  # (Docker ships it at /app/workspace/projects.toml).
-  workdir: "/app/workspace"
+  # Working dir for the codex mcp process = the service state dir (also HOME).
+  # The operating guide (AGENTS.md) is compiled into the server and passed as the
+  # system_key argument below, so it need NOT live here; Codex reads projects.toml
+  # from this dir at runtime (the package installs it at
+  # /var/lib/ci-webhook-codex-agent/projects.toml).
+  workdir: "/var/lib/ci-webhook-codex-agent"
   timeout: "5m"
   # Codex runs as an MCP server; this agent is the MCP client (stdio JSON-RPC).
   mcp:
