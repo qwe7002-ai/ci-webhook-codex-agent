@@ -1,0 +1,62 @@
+# ci-webhook-codex-agent configuration.
+# Copy to config.yaml and adjust. ${VAR} is expanded from the environment at
+# load time, so keep secrets in env vars (see .env.example), not in this file.
+
+server:
+  addr: ":8080"        # listen address
+  path: "/webhook"     # GitHub webhook target path
+
+github:
+  # Shared secret configured on the GitHub webhook (Settings -> Webhooks).
+  # Used to verify X-Hub-Signature-256. REQUIRED.
+  webhook_secret: "${GITHUB_WEBHOOK_SECRET}"
+
+  # Which events to act on. The key is the GitHub event name (X-GitHub-Event).
+  # Any event not listed, or with enabled:false, is ignored.
+  events:
+    issues:
+      enabled: true
+      actions: ["opened", "reopened"]   # empty = any action
+
+    pull_request:
+      enabled: false
+      actions: ["opened", "reopened"]
+
+    push:
+      enabled: false
+
+    # CI failures -> the core "ci-webhook" use case. Only failing runs qualify.
+    workflow_run:
+      enabled: true
+      actions: ["completed"]
+      conclusions: ["failure", "timed_out", "cancelled"]   # empty = any conclusion
+
+    check_run:
+      enabled: false
+      actions: ["completed"]
+      conclusions: ["failure", "timed_out"]
+
+codex:
+  bin: "codex"
+  # Base args for non-interactive exec. Sandbox/approval are set so Codex may run
+  # glab (needs shell + network to the internal GitLab). Tighten to taste; see
+  # README "Security" section for the trade-offs of full-access sandboxing.
+  args:
+    - "exec"
+    - "--skip-git-repo-check"
+    - "-c"
+    - "sandbox_mode=\"danger-full-access\""
+    - "-c"
+    - "approval_policy=\"never\""
+  model: "gpt-5-codex"     # optional; passed as -m. Leave empty to use codex default.
+  workdir: "/tmp"
+  timeout: "5m"
+
+gitlab:
+  host: "${GITLAB_HOST}"      # internal GitLab base URL, e.g. https://gitlab.internal.corp
+  token: "${GITLAB_TOKEN}"    # PAT/project token with api scope (create issues)
+  project: "team/incidents"   # target project path where triage issues are opened
+
+worker:
+  concurrency: 2     # parallel Codex runs
+  queue_size: 100    # bounded backlog; excess deliveries get 503 (GitHub retries)

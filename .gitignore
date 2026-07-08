@@ -1,0 +1,11 @@
+# Local secrets and config
+.env
+config.yaml
+
+# Build output
+/bin/
+/ci-webhook-codex-agent
+
+# Go
+*.test
+*.out
