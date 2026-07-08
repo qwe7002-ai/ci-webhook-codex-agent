@@ -197,6 +197,42 @@ docker compose up --build
 > 若內網 GitLab 只在私有網路，請在 `docker-compose.yml` 把 agent 接到那個
 > network（範例已保留註解）。
 
+### apt / .deb 安裝
+
+`release-deb` workflow 會建置 `.deb`(amd64 / arm64)並發佈成 apt repo 到
+**GitHub Pages**。安裝後會帶一個 systemd service、預設設定於
+`/etc/ci-webhook-codex-agent/`、skill(AGENTS.md + helper)於
+`/var/lib/ci-webhook-codex-agent` 與 `/usr/bin`。
+
+**發佈(維護者)**:
+1. 一次性:repo → Settings → Pages → Source 選 **GitHub Actions**。
+2. 打版本 tag 觸發:`git tag v0.1.0 && git push origin v0.1.0`(或手動跑
+   `release-deb` 並填版本)。完成後開 `https://qwe7002-ai.github.io/ci-webhook-codex-agent/`
+   會有安裝說明頁。
+
+**安裝(使用者)**:
+```bash
+# 方式 A:加入 apt repo(可 apt upgrade)
+echo "deb [trusted=yes] https://qwe7002-ai.github.io/ci-webhook-codex-agent/ ./" \
+  | sudo tee /etc/apt/sources.list.d/ci-webhook-codex-agent.list
+sudo apt-get update
+sudo apt-get install ci-webhook-codex-agent
+
+# 方式 B:直接裝單一 .deb
+curl -fsSLO https://qwe7002-ai.github.io/ci-webhook-codex-agent/pool/ci-webhook-codex-agent_0.1.0_amd64.deb
+sudo apt-get install ./ci-webhook-codex-agent_0.1.0_amd64.deb
+```
+裝完:
+```bash
+sudo nano /etc/ci-webhook-codex-agent/config.yaml   # events / gitlab / pr
+sudo nano /etc/ci-webhook-codex-agent/agent.env     # secrets
+sudo systemctl start ci-webhook-codex-agent
+sudo systemctl status ci-webhook-codex-agent
+```
+> `.deb` 只含 server 本體 + skill + service;`codex` / `glab` / `gh` / `git`
+> 需另外安裝(不在 apt 官方源)。apt line 用 `[trusted=yes]`(repo 未 GPG 簽章);
+> 要簽章的話在 workflow 加 GPG 步驟並用 `signed-by` 取代。
+
 ---
 
 ## 安全性
