@@ -7,6 +7,16 @@ import (
 	"github.com/qwe7002-ai/ci-webhook-codex-agent/internal/config"
 )
 
+// Playbook selects which prompt/flow Codex runs for an incident.
+const (
+	// PlaybookTriageIssue: evaluate the event and open a GitLab issue (default).
+	PlaybookTriageIssue = "triage_issue"
+	// PlaybookPRReview: review the GitHub PR (gh) and mirror it to a GitLab MR.
+	PlaybookPRReview = "pr_review"
+	// PlaybookPRMergeSync: the GitHub PR was merged; merge the mirrored GitLab MR.
+	PlaybookPRMergeSync = "pr_merge_sync"
+)
+
 // Incident is a normalized view of a GitHub webhook event, decoupled from the
 // specific event type so downstream code (prompt building, triage) is uniform.
 type Incident struct {
@@ -19,6 +29,22 @@ type Incident struct {
 	URL        string            // link back to the GitHub object
 	Actor      string            // login of the triggering user, when known
 	Extra      map[string]string // event-specific fields (conclusion, branch, ...)
+
+	Playbook string  // which flow to run (see Playbook* constants)
+	PR       *PRInfo // populated for pull_request events
+}
+
+// PRInfo carries the pull_request fields the PR playbooks need.
+type PRInfo struct {
+	Number      int
+	State       string
+	Merged      bool
+	HeadRef     string // source branch
+	BaseRef     string // target branch
+	HeadRepoURL string // clone URL of the head repo (may be a fork)
+	BaseRepoURL string // clone URL of the base repo
+	HeadSHA     string
+	MergeSHA    string // merge commit SHA once merged
 }
 
 // Decision is the result of applying config filters to a raw event.
@@ -74,7 +100,9 @@ func Evaluate(cfg *config.Config, eventType, deliveryID string, body []byte) (De
 	case "issues":
 		enrichIssue(body, &inc)
 	case "pull_request":
-		enrichPullRequest(body, &inc)
+		if reason, ok := enrichPullRequest(body, &inc); !ok {
+			return Decision{Reason: reason}, nil
+		}
 	case "push":
 		enrichPush(body, &inc)
 	case "workflow_run":
@@ -90,6 +118,11 @@ func Evaluate(cfg *config.Config, eventType, deliveryID string, body []byte) (De
 		// still gets something useful rather than silently dropping it.
 		inc.Title = fmt.Sprintf("%s event on %s", eventType, inc.Repo)
 		inc.Summary = string(body)
+	}
+
+	// Everything that isn't a PR playbook defaults to opening a triage issue.
+	if inc.Playbook == "" {
+		inc.Playbook = PlaybookTriageIssue
 	}
 
 	return Decision{Process: true, Incident: inc}, nil
@@ -141,27 +174,63 @@ func enrichIssue(body []byte, inc *Incident) {
 	}
 }
 
-func enrichPullRequest(body []byte, inc *Incident) {
+// enrichPullRequest populates PR fields and selects the playbook:
+//   - opened / reopened / ready_for_review -> review + mirror to a GitLab MR
+//   - closed with merged=true              -> merge the mirrored GitLab MR
+//   - closed without merge                 -> skipped
+func enrichPullRequest(body []byte, inc *Incident) (string, bool) {
 	var p struct {
 		Number      int `json:"number"`
 		PullRequest struct {
-			Title   string `json:"title"`
-			Body    string `json:"body"`
-			HTMLURL string `json:"html_url"`
-			Head    struct {
-				Ref string `json:"ref"`
+			Title          string `json:"title"`
+			Body           string `json:"body"`
+			HTMLURL        string `json:"html_url"`
+			State          string `json:"state"`
+			Merged         bool   `json:"merged"`
+			MergeCommitSHA string `json:"merge_commit_sha"`
+			Head           struct {
+				Ref  string `json:"ref"`
+				SHA  string `json:"sha"`
+				Repo struct {
+					CloneURL string `json:"clone_url"`
+				} `json:"repo"`
 			} `json:"head"`
 			Base struct {
-				Ref string `json:"ref"`
+				Ref  string `json:"ref"`
+				Repo struct {
+					CloneURL string `json:"clone_url"`
+				} `json:"repo"`
 			} `json:"base"`
 		} `json:"pull_request"`
 	}
 	_ = json.Unmarshal(body, &p)
-	inc.Title = fmt.Sprintf("[GitHub PR #%d] %s", p.Number, p.PullRequest.Title)
-	inc.Summary = p.PullRequest.Body
-	inc.URL = p.PullRequest.HTMLURL
-	inc.Extra["head"] = p.PullRequest.Head.Ref
-	inc.Extra["base"] = p.PullRequest.Base.Ref
+	pr := p.PullRequest
+
+	inc.Title = fmt.Sprintf("[GitHub PR #%d] %s", p.Number, pr.Title)
+	inc.Summary = pr.Body
+	inc.URL = pr.HTMLURL
+	inc.PR = &PRInfo{
+		Number:      p.Number,
+		State:       pr.State,
+		Merged:      pr.Merged,
+		HeadRef:     pr.Head.Ref,
+		BaseRef:     pr.Base.Ref,
+		HeadRepoURL: pr.Head.Repo.CloneURL,
+		BaseRepoURL: pr.Base.Repo.CloneURL,
+		HeadSHA:     pr.Head.SHA,
+		MergeSHA:    pr.MergeCommitSHA,
+	}
+
+	if inc.Action == "closed" {
+		if !pr.Merged {
+			return fmt.Sprintf("PR #%d closed without merge", p.Number), false
+		}
+		inc.Playbook = PlaybookPRMergeSync
+		return "", true
+	}
+	// opened / reopened / ready_for_review (whatever the config allows).
+	inc.Playbook = PlaybookPRReview
+	return "", true
 }
 
 func enrichPush(body []byte, inc *Incident) {

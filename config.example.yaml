@@ -11,6 +11,10 @@ github:
   # Used to verify X-Hub-Signature-256. REQUIRED.
   webhook_secret: "${GITHUB_WEBHOOK_SECRET}"
 
+  # GitHub token (repo scope) for gh: posting PR reviews and fetching PR diffs.
+  # REQUIRED when pull_request is enabled. Exported to Codex as GH_TOKEN.
+  token: "${GH_TOKEN}"
+
   # Which events to act on. The key is the GitHub event name (X-GitHub-Event).
   # Any event not listed, or with enabled:false, is ignored.
   events:
@@ -18,9 +22,11 @@ github:
       enabled: true
       actions: ["opened", "reopened"]   # empty = any action
 
+    # PR monitoring: review each PR (gh, comment mode) and mirror it to a GitLab
+    # MR on opened/reopened; on closed+merged, merge the mirrored MR. See `pr:`.
     pull_request:
-      enabled: false
-      actions: ["opened", "reopened"]
+      enabled: true
+      actions: ["opened", "reopened", "closed"]   # "closed" drives merge-sync (only acts when merged)
 
     push:
       enabled: false
@@ -56,8 +62,15 @@ codex:
 
 gitlab:
   host: "${GITLAB_HOST}"      # internal GitLab base URL, e.g. https://gitlab.internal.corp
-  token: "${GITLAB_TOKEN}"    # PAT/project token with api scope (create issues)
+  token: "${GITLAB_TOKEN}"    # PAT/project token with api scope (create issues + MRs)
   project: "team/incidents"   # target project path where triage issues are opened
+
+# PR playbooks (used when pull_request is enabled).
+pr:
+  review_mode: "comment"                                   # gh review mode; comment = no approve/block
+  gitlab_project: "team/web-mirror"                        # GitLab project for mirrored MRs
+  gitlab_repo_url: "https://gitlab.internal.corp/team/web-mirror.git"  # git push target (no creds; token injected at runtime)
+  target_branch: "main"                                    # base branch for mirrored MRs / merge sync
 
 worker:
   concurrency: 2     # parallel Codex runs

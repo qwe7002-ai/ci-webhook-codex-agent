@@ -65,7 +65,8 @@ func (p *Pool) Stop() {
 func (p *Pool) work(ctx context.Context, id int) {
 	defer p.wg.Done()
 	for inc := range p.jobs {
-		log := p.log.With("worker", id, "delivery", inc.DeliveryID, "event", inc.EventType, "repo", inc.Repo)
+		log := p.log.With("worker", id, "delivery", inc.DeliveryID,
+			"event", inc.EventType, "repo", inc.Repo, "playbook", inc.Playbook)
 		log.Info("processing incident", "title", inc.Title)
 
 		res, err := p.runner.Run(ctx, inc)
@@ -73,7 +74,7 @@ func (p *Pool) work(ctx context.Context, id int) {
 			log.Error("codex run failed", "err", err)
 			continue
 		}
-		log.Info("triage complete", "issue_url", res.IssueURL, "summary", res.Summary)
+		log.Info("playbook complete", "link", res.Link(), "summary", res.Summary)
 	}
 }
 

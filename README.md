@@ -1,20 +1,28 @@
 # ci-webhook-codex-agent
 
-接收 GitHub webhook、交給 **Codex** 做初步評判 (triage)，並透過 **glab** 在
-**內網 GitLab** 建立 issue 的自動化 agent。
+接收 GitHub webhook、交給 **Codex** 處理的自動化 agent。依事件種類走不同 playbook:
+
+- **事故分診 (triage)**:issues / CI 失敗 / push 等 → Codex 初步評判 → glab 在
+  內網 GitLab 建 issue。
+- **PR 監控 (pull_request)**:PR 開啟 → Codex 用 `gh` 以 comment 方式留審查,並把
+  PR 鏡像成內網 GitLab MR;PR 被 merge → 合併對應的 GitLab MR。
 
 ```
 GitHub ──webhook──▶  Go webhook server
                        1. 驗證 HMAC 簽章 (X-Hub-Signature-256)
-                       2. 依設定過濾 / 正規化事件
+                       2. 依設定過濾 / 正規化事件 / 選 playbook
                        3. 立刻回 202,丟進 worker queue
                               │
                               ▼
                        worker pool ──MCP client──▶ codex mcp (stdio JSON-RPC)
-                                          │  tools/call codex(prompt=正規化事件)
-                                          │  Codex 推理 + 初步評判
+                                          │  tools/call codex(prompt=該 playbook 指令)
                                           ▼
-                                       glab CLI ──▶ 內網 GitLab:建立 issue
+        ┌──────────────────────────────────────────────────────────┐
+        │ triage_issue  : glab issue create ──▶ 內網 GitLab issue    │
+        │ pr_review     : gh pr review --comment  +  git push +     │
+        │                 glab mr create ──▶ 內網 GitLab MR (鏡像)    │
+        │ pr_merge_sync : glab mr merge ──▶ 合併鏡像 MR (PR merged)  │
+        └──────────────────────────────────────────────────────────┘
 ```
 
 Codex 以 **MCP server**(`codex mcp`,stdio JSON-RPC)執行,本 agent 是 **MCP
@@ -36,15 +44,18 @@ client**:每個事件開一個 `codex mcp` 子行程,完成 `initialize` 交握�
      `workflow_run` / `check_run` …）。
    - `actions` 過濾 payload 的 `action`；`conclusions` 過濾 CI 的結論
      （把泛用的 CI webhook 收斂成「只對失敗反應」）。
-3. **正規化**：把不同事件攤平成統一的 `Incident`（repo / 標題 / 內文 / 連結 /
-   觸發者 / 事件專屬欄位），下游一律吃這個結構。
-4. **入列**：去重（依 `X-GitHub-Delivery`，防止 GitHub 重送造成重複 issue）後
+3. **正規化 + 選 playbook**：把不同事件攤平成統一的 `Incident`（repo / 標題 /
+   內文 / 連結 / 觸發者 / 事件專屬欄位），並依事件決定 playbook:
+   - `pull_request` opened/reopened → `pr_review`
+   - `pull_request` closed 且 `merged=true` → `pr_merge_sync`(其餘 closed 略過)
+   - 其他事件 → `triage_issue`(預設)
+4. **入列**：去重（依 `X-GitHub-Delivery`，防止 GitHub 重送造成重複動作）後
    丟進 bounded queue，回 `202`。佇列滿了回 `503`，讓 GitHub 之後重送。
-5. **評判 + 建立 issue**：worker 把 `Incident` 套進 prompt，透過 MCP 呼叫 Codex
-   的 `codex` 工具。Codex 讀事件、產出初步評判（類別 / 嚴重度 / 優先級 / 可能原因 /
-   影響 / 下一步），再用 `glab issue create` 在內網 GitLab 開 issue，最後在最終訊息
-   印出 `ISSUE_URL:` 與 `SUMMARY:` 兩行讓 server 解析並記錄。執行期間 Codex 串流的
-   MCP 通知(進度事件)會被 client 記錄後略過,直到工具回傳最終結果。
+5. **執行 playbook**：worker 把 `Incident` 依 playbook 套進對應 prompt，透過 MCP
+   呼叫 Codex 的 `codex` 工具。Codex 用 glab / gh / git 完成動作,最後在最終訊息印出
+   結果行(`ISSUE_URL:` / `MR_URL:` / `SUMMARY:`,失敗則 `ERROR:`)讓 server 解析並
+   記錄。執行期間 Codex 串流的 MCP 通知(進度事件)會被 client 記錄後略過,直到工具
+   回傳最終結果。
 
 ### 初步評判 (preliminary evaluation) 內容
 
@@ -62,6 +73,25 @@ Codex 對每個事件至少輸出：
 
 issue 內文會標註「由自動化 triage agent 建立，評判僅供參考，需人工確認」。
 
+### PR 監控 (pull_request)
+
+啟用 `github.events.pull_request` 後,PR 事件走專屬 playbook(設定見 `pr:` 區塊):
+
+- **`pr_review`(opened / reopened)**
+  1. Codex 用 `gh pr view` / `gh pr diff` 取得 PR 內容與 diff。
+  2. 做初步程式碼審查,並以 **comment** 模式張貼回 GitHub PR:
+     `gh pr review <url> --comment --body ...`(不 approve、不 request-changes)。
+  3. 把 PR 鏡像成內網 GitLab MR:以穩定分支名 `gh-pr-<number>` 把 head 內容
+     `git push` 到 `pr.gitlab_repo_url`,再用 `glab mr create` 在
+     `pr.gitlab_project` 建立/更新對應 MR(target = `pr.target_branch`)。
+- **`pr_merge_sync`(closed 且 merged)**
+  - 把合併後的內容推到鏡像分支,並用 `glab mr merge` 合併對應的 GitLab MR。
+    GitLab 端若有衝突不會強推,改回報 `ERROR`。
+
+> 分支名 `gh-pr-<number>` 是刻意固定的:review 時建立、merge 時據此找到同一個 MR。
+> Review 模式目前固定為 comment(在 `pr.review_mode`);gh 用 `GH_TOKEN` 認證,
+> git push 到 GitLab 用 `GITLAB_TOKEN`(執行期注入 URL,不落地)。
+
 ---
 
 ## 專案結構
@@ -70,10 +100,10 @@ issue 內文會標註「由自動化 triage agent 建立，評判僅供參考，
 cmd/server/main.go        進入點:載入設定、啟動 worker pool 與 HTTP server、優雅關閉
 internal/config           設定載入 (YAML + ${ENV} 展開) 與驗證
 internal/github/verify.go webhook 簽章驗證 (HMAC-SHA256)
-internal/github/event.go  事件過濾 + 正規化成 Incident
-internal/prompt           Codex prompt 模板 (含 glab 指令與評判規格)
+internal/github/event.go  事件過濾 + 正規化成 Incident + 選 playbook
+internal/prompt           各 playbook 的 Codex prompt 模板 (triage / pr_review / pr_merge)
 internal/mcp              精簡 MCP stdio client (initialize + tools/call)
-internal/codex            啟動 codex mcp、注入 GITLAB_* 環境變數、呼叫工具、解析輸出
+internal/codex            啟動 codex mcp、注入 GITLAB_*/GH_TOKEN 環境變數、呼叫工具、解析輸出
 internal/worker           bounded queue + worker pool + 去重
 internal/server           HTTP 路由與 webhook handler
 scripts/setup-glab.sh     (選用) 手動驗證 glab 能連到內網 GitLab
@@ -100,8 +130,9 @@ cp .env.example .env        # 填入 secret
 | 變數 | 用途 |
 |------|------|
 | `GITHUB_WEBHOOK_SECRET` | 驗證 webhook 簽章，需與 GitHub 上設定一致 |
+| `GH_TOKEN` | GitHub token(repo scope)，供 gh 留 PR review / 取 diff。啟用 pull_request 時必填 |
 | `GITLAB_HOST` | 內網 GitLab base URL，會注入 Codex 子行程供 glab 使用 |
-| `GITLAB_TOKEN` | 具 `api` scope 的 PAT/專案 token，供 glab 建 issue |
+| `GITLAB_TOKEN` | 具 `api` scope 的 PAT/專案 token，供 glab 建 issue / MR 與 git push |
 | `OPENAI_API_KEY` | （或你的 codex 安裝所需的認證）供 Codex 推理 |
 
 ---
@@ -110,8 +141,9 @@ cp .env.example .env        # 填入 secret
 
 ### 本機
 
-前置：安裝 [`codex`](https://github.com/openai/codex) 與
-[`glab`](https://gitlab.com/gitlab-org/cli)，並確認機器能連到內網 GitLab。
+前置：安裝 [`codex`](https://github.com/openai/codex)、
+[`glab`](https://gitlab.com/gitlab-org/cli)、[`gh`](https://cli.github.com/) 與
+`git`，並確認機器能連到內網 GitLab(以及 GitHub,供 PR 鏡像)。
 
 ```bash
 make build
@@ -123,7 +155,7 @@ set -a; source .env; set +a
 - Payload URL：`https://<你的服務>/webhook`
 - Content type：`application/json`
 - Secret：與 `GITHUB_WEBHOOK_SECRET` 相同
-- Events：依需求勾選（例如 Workflow runs / Issues）
+- Events：依需求勾選（例如 Workflow runs / Issues / Pull requests）
 
 ### Docker
 
@@ -144,12 +176,17 @@ docker compose up --build
 - **簽章必驗**：所有 webhook 都先驗 `X-Hub-Signature-256` 才處理內容；raw body
   在任何再編碼前先驗，用 constant-time 比較。
 - **Secret 不落地**：token 走環境變數，設定檔只留 `${VAR}` 佔位。
-- **Codex sandbox**：Codex 需要能跑 shell（`glab`）並連到內網 GitLab，範例把
-  `codex.mcp.arguments` 設為 `sandbox: danger-full-access` + `approval-policy:
-  never`（透過 MCP 工具參數傳入）。這代表 Codex 在該容器內可執行任意指令，請務必：
-  - 跑在**隔離、最小權限**的容器/主機，只給它到 GitLab 與 model API 的網路；
-  - `GITLAB_TOKEN` 只給必要的專案與 `api` scope；
-  - 有需要可改成 `workspace-write` + 限制網路，並在 prompt 白名單化只允許 `glab`。
+- **Codex sandbox**：Codex 需要能跑 shell（`glab` / `gh` / `git`）並連到內網
+  GitLab 與 GitHub，範例把 `codex.mcp.arguments` 設為 `sandbox:
+  danger-full-access` + `approval-policy: never`（透過 MCP 工具參數傳入）。這代表
+  Codex 在該容器內可執行任意指令，請務必：
+  - 跑在**隔離、最小權限**的容器/主機，只給它到 GitLab / GitHub / model API 的網路；
+  - `GITLAB_TOKEN` 只給必要專案與 `api` scope;`GH_TOKEN` 只給必要 repo 的最小 scope
+    (PR review + 讀取);
+  - 有需要可改成 `workspace-write` + 限制網路。
+- **PR 鏡像**：`pr_review` / `pr_merge_sync` 會 `git push` 到內網 GitLab 並可能
+  `glab mr merge`。請確認 mirror 專案是**專用鏡像 repo**(而非正式主幹),並用最小權限
+  token,避免自動化誤動到生產分支。merge sync 遇 GitLab 端衝突時刻意不強推、改回報錯。
 - **MCP 交握**：本 agent 不實作 server→client 的請求（sampling / elicitation
   等),收到就回 `method not supported` 拒絕。搭配 `approval-policy: never`,正常
   流程不會走到這條路;若你改了 approval 政策而 Codex 需要人工核准,工具呼叫會因為
@@ -157,10 +194,11 @@ docker compose up --build
 - **工具參數相容性**:`codex` 工具的參數名稱(如 `sandbox` / `approval-policy`)
   會隨 Codex 版本的 tool schema 變動。它們放在 `config.yaml` 的
   `codex.mcp.arguments`,可直接改設定對齊你的版本,不需動程式。
-- **外部輸入**：payload 內文（issue/PR/commit 訊息）屬不可信輸入，會被放進
-  prompt。Codex 被指示只做「建立 issue」這一件事並最多重試一次；請勿放寬到讓它
-  執行 payload 內文中要求的其他動作。
-- **去重**：以 `X-GitHub-Delivery` 去重，避免 GitHub 重送造成重複 issue（目前為
+- **外部輸入**：payload 內文（issue/PR/commit 訊息、PR diff）屬不可信輸入，會被放進
+  prompt。各 playbook 都把 Codex 限定在該做的動作(建 issue / 留 comment 審查 + 建 MR /
+  合併 MR)並最多重試一次；請勿放寬到讓它執行 payload 或 diff 內文中要求的其他動作
+  (prompt injection)。
+- **去重**：以 `X-GitHub-Delivery` 去重，避免 GitHub 重送造成重複動作（目前為
   記憶體內、近 1024 筆的視窗；需跨重啟持久化可再接 Redis 等）。
 
 ---
@@ -168,7 +206,7 @@ docker compose up --build
 ## 開發
 
 ```bash
-make test    # 單元測試 (簽章驗證 + 事件過濾/正規化 + MCP client 交握/工具呼叫)
+make test    # 簽章驗證 + 事件過濾/正規化/選 playbook + prompt 模板 + MCP client 交握/工具呼叫
 make vet
 ```
 

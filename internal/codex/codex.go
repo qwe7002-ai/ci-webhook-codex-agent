@@ -28,16 +28,25 @@ func New(cfg *config.Config, log *slog.Logger) *Runner { return &Runner{cfg: cfg
 
 // Result is the parsed outcome of a Codex run.
 type Result struct {
-	IssueURL string // parsed from an "ISSUE_URL:" line, if present
+	IssueURL string // parsed from an "ISSUE_URL:" line (triage playbook)
+	MRURL    string // parsed from an "MR_URL:" line (PR playbooks)
 	Summary  string // parsed from a "SUMMARY:" line, if present
 	Output   string // full final message, for logging/debugging
+}
+
+// Link returns whichever URL the playbook produced, for logging.
+func (r *Result) Link() string {
+	if r.IssueURL != "" {
+		return r.IssueURL
+	}
+	return r.MRURL
 }
 
 // Run renders the prompt, opens an MCP session to Codex, calls the tool, and
 // parses the result. The GitLab host/token are injected into the `codex mcp`
 // child environment so glab (called by Codex) authenticates without a login.
 func (r *Runner) Run(ctx context.Context, inc github.Incident) (*Result, error) {
-	promptText, err := prompt.Render(inc, r.cfg.GitLab.Project)
+	promptText, err := prompt.Render(inc, r.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("render prompt: %w", err)
 	}
@@ -61,12 +70,13 @@ func (r *Runner) Run(ctx context.Context, inc github.Incident) (*Result, error) 
 	out := res.Text()
 	result := &Result{Output: out}
 	result.IssueURL = extractField(out, "ISSUE_URL:")
+	result.MRURL = extractField(out, "MR_URL:")
 	result.Summary = extractField(out, "SUMMARY:")
 
 	if res.IsError {
 		return result, fmt.Errorf("codex tool returned error: %s", truncate(out, 2000))
 	}
-	if errLine := extractField(out, "ERROR:"); errLine != "" && result.IssueURL == "" {
+	if errLine := extractField(out, "ERROR:"); errLine != "" && result.Link() == "" {
 		return result, fmt.Errorf("codex reported error: %s", errLine)
 	}
 	return result, nil
@@ -95,6 +105,10 @@ func (r *Runner) childEnv() []string {
 	}
 	if r.cfg.GitLab.Token != "" {
 		env = append(env, "GITLAB_TOKEN="+r.cfg.GitLab.Token)
+	}
+	// gh (PR review/fetch) reads GH_TOKEN or GITHUB_TOKEN; set both.
+	if r.cfg.GitHub.Token != "" {
+		env = append(env, "GH_TOKEN="+r.cfg.GitHub.Token, "GITHUB_TOKEN="+r.cfg.GitHub.Token)
 	}
 	return env
 }

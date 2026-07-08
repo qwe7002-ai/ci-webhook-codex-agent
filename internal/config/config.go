@@ -17,6 +17,7 @@ type Config struct {
 	GitHub GitHubConfig `yaml:"github"`
 	Codex  CodexConfig  `yaml:"codex"`
 	GitLab GitLabConfig `yaml:"gitlab"`
+	PR     PRConfig     `yaml:"pr"`
 	Worker WorkerConfig `yaml:"worker"`
 }
 
@@ -31,6 +32,11 @@ type GitHubConfig struct {
 	// WebhookSecret is the shared secret configured on the GitHub webhook.
 	// Used to verify the X-Hub-Signature-256 header. Provide via ${GITHUB_WEBHOOK_SECRET}.
 	WebhookSecret string `yaml:"webhook_secret"`
+
+	// Token is a GitHub token (repo scope) exported to the Codex process as
+	// GH_TOKEN/GITHUB_TOKEN so `gh` can post PR reviews and fetch PR diffs.
+	// Required when the pull_request event is enabled. Provide via ${GH_TOKEN}.
+	Token string `yaml:"token"`
 
 	// Events maps a GitHub event name (the X-GitHub-Event header value, e.g.
 	// "issues", "pull_request", "push", "workflow_run", "check_run") to a filter.
@@ -84,6 +90,24 @@ type GitLabConfig struct {
 	Project string `yaml:"project"` // target project path for issues, e.g. "team/incidents"
 }
 
+// PRConfig controls the pull_request playbooks: reviewing GitHub PRs with gh and
+// mirroring/merging them as GitLab merge requests via glab + git. These values
+// are surfaced to Codex through the prompt; Codex runs the actual commands.
+type PRConfig struct {
+	// ReviewMode is how gh posts the review. Currently "comment" (leave a review
+	// comment without approving or blocking). Other values are advisory to Codex.
+	ReviewMode string `yaml:"review_mode"`
+	// GitLabProject is the GitLab project path that mirrored MRs live in,
+	// e.g. "team/web-mirror".
+	GitLabProject string `yaml:"gitlab_project"`
+	// GitLabRepoURL is the git URL Codex pushes PR branches to (the mirror repo).
+	// e.g. "https://gitlab.internal.corp/team/web-mirror.git". Codex injects the
+	// token for auth; do not embed credentials here.
+	GitLabRepoURL string `yaml:"gitlab_repo_url"`
+	// TargetBranch is the base branch for mirrored MRs / merge sync. Default "main".
+	TargetBranch string `yaml:"target_branch"`
+}
+
 // WorkerConfig controls the async processing pool. Webhooks are acknowledged
 // immediately and processed here, because a Codex run takes far longer than
 // GitHub's ~10s webhook timeout.
@@ -116,6 +140,7 @@ func Load(path string) (*Config, error) {
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{Addr: ":8080", Path: "/webhook"},
+		PR:     PRConfig{ReviewMode: "comment", TargetBranch: "main"},
 		Codex: CodexConfig{
 			Bin:     "codex",
 			Workdir: os.TempDir(),
@@ -155,6 +180,21 @@ func (c *Config) validate() error {
 	}
 	if c.Codex.MCP.PromptKey == "" {
 		c.Codex.MCP.PromptKey = "prompt"
+	}
+	if c.PR.ReviewMode == "" {
+		c.PR.ReviewMode = "comment"
+	}
+	if c.PR.TargetBranch == "" {
+		c.PR.TargetBranch = "main"
+	}
+	// The pull_request playbooks need gh auth and a mirror target.
+	if f, ok := c.GitHub.Events["pull_request"]; ok && f.Enabled {
+		if c.GitHub.Token == "" {
+			return fmt.Errorf("github.token is required when pull_request is enabled (set GH_TOKEN)")
+		}
+		if c.PR.GitLabProject == "" || c.PR.GitLabRepoURL == "" {
+			return fmt.Errorf("pr.gitlab_project and pr.gitlab_repo_url are required when pull_request is enabled")
+		}
 	}
 	return nil
 }

@@ -14,6 +14,7 @@ func testCfg() *config.Config {
 				"issues":       {Enabled: true, Actions: []string{"opened"}},
 				"workflow_run": {Enabled: true, Actions: []string{"completed"}, Conclusions: []string{"failure"}},
 				"push":         {Enabled: false},
+				"pull_request": {Enabled: true, Actions: []string{"opened", "reopened", "closed"}},
 			},
 		},
 	}
@@ -74,5 +75,37 @@ func TestEvaluate_WorkflowRunConclusionFilter(t *testing.T) {
 	}
 	if d.Process {
 		t.Fatal("expected successful workflow_run to be filtered out")
+	}
+}
+
+func TestEvaluate_PullRequestPlaybooks(t *testing.T) {
+	opened := []byte(`{"action":"opened","repository":{"full_name":"o/r"},"number":7,"pull_request":{"title":"add feature","html_url":"https://gh/pr/7","head":{"ref":"feat","sha":"deadbeef","repo":{"clone_url":"https://github.com/o/r.git"}},"base":{"ref":"main"}}}`)
+	d, err := Evaluate(testCfg(), "pull_request", "p1", opened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Process || d.Incident.Playbook != PlaybookPRReview {
+		t.Fatalf("expected pr_review playbook, got process=%v playbook=%q", d.Process, d.Incident.Playbook)
+	}
+	if d.Incident.PR == nil || d.Incident.PR.Number != 7 || d.Incident.PR.HeadRef != "feat" {
+		t.Fatalf("PR info not populated: %+v", d.Incident.PR)
+	}
+
+	mergedClosed := []byte(`{"action":"closed","repository":{"full_name":"o/r"},"number":7,"pull_request":{"title":"add feature","html_url":"https://gh/pr/7","merged":true,"merge_commit_sha":"abc","head":{"ref":"feat"},"base":{"ref":"main"}}}`)
+	d, err = Evaluate(testCfg(), "pull_request", "p2", mergedClosed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Process || d.Incident.Playbook != PlaybookPRMergeSync {
+		t.Fatalf("expected pr_merge_sync, got process=%v playbook=%q", d.Process, d.Incident.Playbook)
+	}
+
+	unmergedClosed := []byte(`{"action":"closed","repository":{"full_name":"o/r"},"number":8,"pull_request":{"title":"abandoned","merged":false,"head":{"ref":"x"},"base":{"ref":"main"}}}`)
+	d, err = Evaluate(testCfg(), "pull_request", "p3", unmergedClosed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Process {
+		t.Fatal("expected closed-without-merge PR to be skipped")
 	}
 }
