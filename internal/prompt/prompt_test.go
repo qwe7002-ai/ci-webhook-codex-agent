@@ -80,7 +80,9 @@ func TestRender_PRMergeSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"pr_merge_sync", "gh-pr-7", "o/r", "abc"} {
+	// Includes the base branch so Codex can resolve <TARGET> from projects.toml
+	// if it has to create the MR.
+	for _, want := range []string{"pr_merge_sync", "gh-pr-7", "o/r", "abc", "main"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("pr_merge prompt missing %q:\n%s", want, out)
 		}

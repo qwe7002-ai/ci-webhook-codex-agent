@@ -84,7 +84,8 @@ git 網址、MR 目標分支)全部**依來源 repo 從 `projects.toml` 解析**
      `gh pr review <url> --comment --body ...`(不 approve、不 request-changes)。
   3. 把 PR 鏡像成內網 GitLab MR:以穩定分支名 `gh-pr-<number>` 把 head 內容
      `git push` 到鏡像 git 網址,再用 `glab mr create` 在對應 GitLab 專案
-     建立/更新 MR(target 分支取自 `projects.toml`)。
+     建立/更新 MR(target 分支:拿 PR 的 base 分支查 `projects.toml` 的分支對照,
+     沒列到就同名)。
 - **`pr_merge_sync`(closed 且 merged)**
   - 把合併後的內容推到鏡像分支,並用 `glab mr merge` 合併對應的 GitLab MR。
     GitLab 端若有衝突不會強推,改回報 `ERROR`。
@@ -134,9 +135,10 @@ scripts/setup-glab.sh     (選用) 手動驗證 glab 能連到內網 GitLab
   這段最容易寫錯、又牽涉憑證的部分封裝成一支經過測試的腳本(shallow clone、GitHub 端用 `gh`、
   GitLab push 用 glab 的 git credential helper,憑證**絕不進 URL 或落地**、trap 清理暫存)。
   prompt 直接叫 Codex 執行它,而非自己拼 git 指令,降低出錯與洩漏風險。
-- **`projects.toml`** — GitHub repo → 內網 GitLab 專案的對照表(可列多個),外加預設內網 host
-  與每個 repo 的鏡像 MR 目標分支(`target_branch`,沒寫就用 `default_target_branch`)。Codex 於
-  執行期依「來源 repo」查表,解析出 `<PROJECT>` / `<MIRROR_PROJECT>` / mirror git URL / `<TARGET>`。
+- **`projects.toml`** — GitHub repo → 內網 GitLab 專案的對照表(可列多個),外加預設內網 host,
+  以及每個 repo 的**分支對照** `[projects.target_branch]`(GitHub base 分支 → GitLab MR 目標分支,
+  例如 `nightly = "nightly_github"`;沒列到的分支同名鏡像)。Codex 於執行期依「來源 repo」與
+  「PR base 分支」查表,解析出 `<PROJECT>` / `<MIRROR_PROJECT>` / mirror git URL / `<TARGET>`。
   PR 鏡像的所有目標參數都出自這裡,不在 `config.yaml`。
 
 > 事件資料(來源 repo、PR 編號等)由 agent 注入 prompt;鏡像目標(GitLab 專案、mirror URL、

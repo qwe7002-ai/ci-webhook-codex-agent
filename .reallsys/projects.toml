@@ -9,19 +9,16 @@
 #   1. 找 github 等於來源 repo 的項目,用它的 gitlab 當內網專案路徑。
 #   2. 找不到就用 default_host + 相同的 <owner>/<repo>。
 #   3. 內網 git 網址一律 = <default_host>/<gitlab 路徑>.git
-#   4. 鏡像 MR 的目標分支 = 該項目的 target_branch,沒寫就用 default_target_branch。
+#   4. 鏡像 MR 的目標分支:拿 GitHub PR 的 base 分支去查該項目的 [projects.target_branch]
+#      對照表;沒列到的分支就用同名(identity)。
 
 # 預設內網 GitLab host。
 default_host = "https://git.reall.us"
 
-# 鏡像 MR 的預設目標分支(個別項目可用 target_branch 覆蓋)。
-default_target_branch = "main"
-
 # 個別對照:可列多個 [[projects]]。只有當內網路徑與 GitHub 的 <owner>/<repo> 不同、
-# 或該 repo 的目標分支不是 default_target_branch 時,才需要列。
-#   github        = "<owner>/<repo>"   GitHub 來源 repo
-#   gitlab        = "<group>/<proj>"   對應的內網 GitLab 專案路徑
-#   target_branch = "<branch>"         (選填)鏡像 MR 的目標分支,覆蓋 default_target_branch
+# 或有分支需要改名鏡像時,才需要列。
+#   github = "<owner>/<repo>"   GitHub 來源 repo
+#   gitlab = "<group>/<proj>"   對應的內網 GitLab 專案路徑
 [[projects]]
 github = "telegram-sms/telegram-sms"
 gitlab = "telegram-sms/telegram-sms"
@@ -29,4 +26,7 @@ gitlab = "telegram-sms/telegram-sms"
 [[projects]]
 github = "example/web"
 gitlab = "team/web-mirror"
-target_branch = "release"
+# 分支對照(GitHub base 分支 -> GitLab MR 目標分支)。只列**不同名**的;
+# 沒列到的分支預設同名鏡像(例如 main -> main)。
+[projects.target_branch]
+nightly = "nightly_github"

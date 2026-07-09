@@ -122,5 +122,6 @@ const prMergeTmpl = `Run the pr_merge_sync playbook from AGENTS.md: GitHub PR #{
 ## Parameters
 - source repo: {{.Repo}}
 - PR number: {{.PR.Number}}
+- PR base branch (for <TARGET> lookup): {{.PR.BaseRef}}
 - mirror branch: {{.MirrorBranch}}
 `

@@ -22,8 +22,11 @@ playbook first reads `projects.toml` and resolves from the event's source repo (
 2. Otherwise the target project is the same `<owner>/<repo>`.
 3. The mirror git URL is always `<default_host>/<target project>.git` (`default_host` comes from
    `projects.toml`).
-4. The MR target branch `<TARGET>` is the matched entry's `target_branch`; if it has none (or no
-   entry matched), use the top-level `default_target_branch` (fall back to `main` if that is unset).
+4. The MR target branch `<TARGET>` is resolved from the GitHub PR's **base branch** via the matched
+   entry's `[projects.target_branch]` table (GitHub base branch -> GitLab target branch). If that
+   base branch is not listed (or the entry/table is absent), `<TARGET>` is the **same branch name**
+   (identity). Example: with `nightly = "nightly_github"`, a PR based on `nightly` mirrors to an MR
+   targeting `nightly_github`, while a PR based on `main` targets `main`.
 
 This resolved project is `<PROJECT>` for triage_issue and `<MIRROR_PROJECT>` for the PR playbooks —
 use it (and the mirror URL and `<TARGET>`) everywhere a playbook references them.
