@@ -28,7 +28,6 @@ type Config struct {
 	GitHub GitHubConfig `yaml:"github"`
 	Codex  CodexConfig  `yaml:"codex"`
 	GitLab GitLabConfig `yaml:"gitlab"`
-	PR     PRConfig     `yaml:"pr"`
 	Worker WorkerConfig `yaml:"worker"`
 
 	// WebhookSecretPath is the file the webhook secret was auto-loaded from or
@@ -116,23 +115,10 @@ type GitLabConfig struct {
 	Project string `yaml:"project"` // target project path for issues, e.g. "team/incidents"
 }
 
-// PRConfig controls the pull_request playbooks: reviewing GitHub PRs with gh and
-// mirroring/merging them as GitLab merge requests via glab + git. These values
-// are surfaced to Codex through the prompt; Codex runs the actual commands.
-type PRConfig struct {
-	// ReviewMode is how gh posts the review. Currently "comment" (leave a review
-	// comment without approving or blocking). Other values are advisory to Codex.
-	ReviewMode string `yaml:"review_mode"`
-	// GitLabProject is the GitLab project path that mirrored MRs live in,
-	// e.g. "team/web-mirror".
-	GitLabProject string `yaml:"gitlab_project"`
-	// GitLabRepoURL is the git URL Codex pushes PR branches to (the mirror repo).
-	// e.g. "https://gitlab.internal.corp/team/web-mirror.git". The push is
-	// authenticated by glab's git credential helper; do not embed credentials here.
-	GitLabRepoURL string `yaml:"gitlab_repo_url"`
-	// TargetBranch is the base branch for mirrored MRs / merge sync. Default "main".
-	TargetBranch string `yaml:"target_branch"`
-}
+// The pull_request playbooks (PR review + GitLab mirror/merge) take all their
+// per-repo parameters — the target GitLab project, the mirror git URL, and the
+// MR target branch — from projects.toml, which Codex reads at runtime. None of
+// that lives in this config anymore.
 
 // WorkerConfig controls the async processing pool. Webhooks are acknowledged
 // immediately and processed here, because a Codex run takes far longer than
@@ -209,7 +195,6 @@ func (c *Config) resolveWebhookSecret() error {
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{Addr: ":8080", Path: "/webhook"},
-		PR:     PRConfig{ReviewMode: "comment", TargetBranch: "main"},
 		Codex: CodexConfig{
 			Bin:     "codex",
 			Workdir: os.TempDir(),
@@ -250,19 +235,8 @@ func (c *Config) validate() error {
 	if c.Codex.MCP.PromptKey == "" {
 		c.Codex.MCP.PromptKey = "prompt"
 	}
-	if c.PR.ReviewMode == "" {
-		c.PR.ReviewMode = "comment"
-	}
-	if c.PR.TargetBranch == "" {
-		c.PR.TargetBranch = "main"
-	}
-	// The pull_request playbooks need a mirror target. gh/glab supply their own
-	// auth (from `gh auth login` / `glab auth login`), so nothing token-related
-	// is validated here.
-	if f, ok := c.GitHub.Events["pull_request"]; ok && f.Enabled {
-		if c.PR.GitLabProject == "" || c.PR.GitLabRepoURL == "" {
-			return fmt.Errorf("pr.gitlab_project and pr.gitlab_repo_url are required when pull_request is enabled")
-		}
-	}
+	// The pull_request playbooks resolve their GitLab project, mirror URL, and
+	// target branch from projects.toml at runtime (see AGENTS.md), so there is
+	// nothing PR-specific to validate here.
 	return nil
 }

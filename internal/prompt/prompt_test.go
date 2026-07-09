@@ -11,12 +11,6 @@ import (
 func cfg() *config.Config {
 	return &config.Config{
 		GitLab: config.GitLabConfig{Project: "team/incidents"},
-		PR: config.PRConfig{
-			ReviewMode:    "comment",
-			GitLabProject: "team/mirror",
-			GitLabRepoURL: "https://gitlab.internal/team/mirror.git",
-			TargetBranch:  "main",
-		},
 	}
 }
 
@@ -68,9 +62,9 @@ func TestRender_PRReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Names the playbook and passes the mirror branch, target, and the
-	// projects.toml fallback project/URL.
-	for _, want := range []string{"pr_review", "AGENTS.md", "gh-pr-7", "MIRROR_PROJECT", "team/mirror", "main"} {
+	// Names the playbook and passes the source repo + mirror branch; Codex
+	// resolves the mirror project/URL/target branch from projects.toml.
+	for _, want := range []string{"pr_review", "AGENTS.md", "gh-pr-7", "o/r"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("pr_review prompt missing %q:\n%s", want, out)
 		}
@@ -86,7 +80,7 @@ func TestRender_PRMergeSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"pr_merge_sync", "gh-pr-7", "MIRROR_PROJECT", "team/mirror", "abc"} {
+	for _, want := range []string{"pr_merge_sync", "gh-pr-7", "o/r", "abc"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("pr_merge prompt missing %q:\n%s", want, out)
 		}

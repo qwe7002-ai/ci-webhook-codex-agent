@@ -17,10 +17,6 @@ import (
 type view struct {
 	github.Incident
 	GitLabProject string   // issue project (triage) — from gitlab.project
-	PRProject     string   // MR project (pr playbooks) — from pr.gitlab_project
-	MirrorRepoURL string   // git push target for mirrored PR branches
-	TargetBranch  string   // MR base branch
-	ReviewMode    string   // gh review mode (comment)
 	MirrorBranch  string   // stable GitLab source branch for this PR
 	ExtraLines    []string // formatted Extra map, for triage
 	IsGitHubIssue bool     // event is a GitHub issue → we can reply back on it
@@ -31,10 +27,6 @@ func Render(inc github.Incident, cfg *config.Config) (string, error) {
 	v := view{
 		Incident:      inc,
 		GitLabProject: cfg.GitLab.Project,
-		PRProject:     cfg.PR.GitLabProject,
-		MirrorRepoURL: cfg.PR.GitLabRepoURL,
-		TargetBranch:  cfg.PR.TargetBranch,
-		ReviewMode:    cfg.PR.ReviewMode,
 		ExtraLines:    formatExtra(inc.Extra),
 		IsGitHubIssue: inc.EventType == "issues",
 	}
@@ -104,6 +96,8 @@ const triageTmpl = `Run the triage_issue playbook from AGENTS.md for the GitHub 
 `
 
 // prReviewTmpl: review a GitHub PR (gh) and mirror it as a GitLab MR (git + glab).
+// Codex resolves MIRROR_PROJECT, the mirror git URL, and the MR target branch
+// from projects.toml (see AGENTS.md) using the source repo below.
 const prReviewTmpl = `Run the pr_review playbook from AGENTS.md for the GitHub pull_request event below (action={{.Action}}).
 
 ## Parameters
@@ -112,8 +106,6 @@ const prReviewTmpl = `Run the pr_review playbook from AGENTS.md for the GitHub p
 - PR URL: {{.URL}}
 - PR title: {{.Title}}
 - mirror branch: {{.MirrorBranch}}
-- MR target branch (<TARGET>): {{.TargetBranch}}
-- projects.toml fallback if unreadable — MIRROR_PROJECT: {{.PRProject}}, mirror git URL: {{.MirrorRepoURL}}
 
 ## PR info
 - head (source): {{.PR.HeadRef}} @ {{.PR.HeadSHA}}  ->  base (target): {{.PR.BaseRef}}
@@ -123,13 +115,12 @@ const prReviewTmpl = `Run the pr_review playbook from AGENTS.md for the GitHub p
 {{if .Summary}}{{.Summary}}{{else}}(none){{end}}
 `
 
-// prMergeTmpl: the GitHub PR was merged; merge the mirrored GitLab MR.
+// prMergeTmpl: the GitHub PR was merged; merge the mirrored GitLab MR. Codex
+// resolves MIRROR_PROJECT / mirror URL / target branch from projects.toml.
 const prMergeTmpl = `Run the pr_merge_sync playbook from AGENTS.md: GitHub PR #{{.PR.Number}} ({{.URL}}) has been merged (merge commit {{.PR.MergeSHA}}). Sync it to the internal GitLab.
 
 ## Parameters
 - source repo: {{.Repo}}
 - PR number: {{.PR.Number}}
 - mirror branch: {{.MirrorBranch}}
-- MR target branch: {{.TargetBranch}}
-- projects.toml fallback if unreadable — MIRROR_PROJECT: {{.PRProject}}, mirror git URL: {{.MirrorRepoURL}}
 `

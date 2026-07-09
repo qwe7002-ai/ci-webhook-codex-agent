@@ -79,12 +79,10 @@ gitlab:
                               # (points glab at the right instance; auth comes from `glab auth login`)
   project: "team/incidents"   # target project path where triage issues are opened
 
-# PR playbooks (used when pull_request is enabled).
-pr:
-  review_mode: "comment"                                   # gh review mode; comment = no approve/block
-  gitlab_project: "team/web-mirror"                        # GitLab project for mirrored MRs
-  gitlab_repo_url: "https://gitlab.internal.corp/team/web-mirror.git"  # git push target (no creds; glab's credential helper authenticates the push)
-  target_branch: "main"                                    # base branch for mirrored MRs / merge sync
+# PR playbooks: the mirror GitLab project, its git URL, and the MR target
+# branch are all resolved per-repo from projects.toml (read by Codex at
+# runtime), not configured here. See the projects.toml shipped alongside this
+# config / AGENTS.md.
 
 worker:
   concurrency: 2     # parallel Codex runs

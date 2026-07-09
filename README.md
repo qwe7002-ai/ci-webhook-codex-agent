@@ -75,21 +75,22 @@ issue 內文會標註「由自動化 triage agent 建立，評判僅供參考，
 
 ### PR 監控 (pull_request)
 
-啟用 `github.events.pull_request` 後,PR 事件走專屬 playbook(設定見 `pr:` 區塊):
+啟用 `github.events.pull_request` 後,PR 事件走專屬 playbook。鏡像目標(GitLab 專案、
+git 網址、MR 目標分支)全部**依來源 repo 從 `projects.toml` 解析**,不在 config 裡設:
 
 - **`pr_review`(opened / reopened)**
   1. Codex 用 `gh pr view` / `gh pr diff` 取得 PR 內容與 diff。
   2. 做初步程式碼審查,並以 **comment** 模式張貼回 GitHub PR:
      `gh pr review <url> --comment --body ...`(不 approve、不 request-changes)。
   3. 把 PR 鏡像成內網 GitLab MR:以穩定分支名 `gh-pr-<number>` 把 head 內容
-     `git push` 到 `pr.gitlab_repo_url`,再用 `glab mr create` 在
-     `pr.gitlab_project` 建立/更新對應 MR(target = `pr.target_branch`)。
+     `git push` 到鏡像 git 網址,再用 `glab mr create` 在對應 GitLab 專案
+     建立/更新 MR(target 分支取自 `projects.toml`)。
 - **`pr_merge_sync`(closed 且 merged)**
   - 把合併後的內容推到鏡像分支,並用 `glab mr merge` 合併對應的 GitLab MR。
     GitLab 端若有衝突不會強推,改回報 `ERROR`。
 
 > 分支名 `gh-pr-<number>` 是刻意固定的:review 時建立、merge 時據此找到同一個 MR。
-> Review 模式目前固定為 comment(在 `pr.review_mode`);gh / glab 各自用**自己的**登入
+> Review 模式固定為 comment(寫死在 AGENTS.md 安全規則);gh / glab 各自用**自己的**登入
 > 憑證(`gh auth login` / `glab auth login`),本服務不管理任何 token;git push 到 GitLab
 > 走 glab 的 git credential helper,憑證不進 URL、不落地。
 
@@ -133,10 +134,14 @@ scripts/setup-glab.sh     (選用) 手動驗證 glab 能連到內網 GitLab
   這段最容易寫錯、又牽涉憑證的部分封裝成一支經過測試的腳本(shallow clone、GitHub 端用 `gh`、
   GitLab push 用 glab 的 git credential helper,憑證**絕不進 URL 或落地**、trap 清理暫存)。
   prompt 直接叫 Codex 執行它,而非自己拼 git 指令,降低出錯與洩漏風險。
+- **`projects.toml`** — GitHub repo → 內網 GitLab 專案的對照表(可列多個),外加預設內網 host
+  與每個 repo 的鏡像 MR 目標分支(`target_branch`,沒寫就用 `default_target_branch`)。Codex 於
+  執行期依「來源 repo」查表,解析出 `<PROJECT>` / `<MIRROR_PROJECT>` / mirror git URL / `<TARGET>`。
+  PR 鏡像的所有目標參數都出自這裡,不在 `config.yaml`。
 
-> skill 的參數(GitLab 專案、mirror URL、目標分支等)由 agent 依事件與 `pr:` 設定注入 prompt;
-> Codex 只需照 AGENTS.md 執行。要調整行為(例如改審查模式、換分支命名),改 AGENTS.md /
-> 腳本 / 設定即可,Go 端不用動。
+> 事件資料(來源 repo、PR 編號等)由 agent 注入 prompt;鏡像目標(GitLab 專案、mirror URL、
+> MR 目標分支)則由 Codex 依來源 repo 從 `projects.toml` 解析。要調整對照或目標分支,改
+> `projects.toml`;要改流程/安全規範,改 AGENTS.md / 腳本即可,Go 端不用動。
 
 ---
 
