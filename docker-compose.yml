@@ -10,6 +10,7 @@ services:
       # GITHUB_WEBHOOK_SECRET is optional; if empty the agent auto-generates one
       # under codex.workdir (persist that dir — see the volume below).
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      PUBLIC_URL: ${PUBLIC_URL:-}
       GITLAB_HOST: ${GITLAB_HOST}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:

@@ -75,21 +75,23 @@ issue 內文會標註「由自動化 triage agent 建立，評判僅供參考，
 
 ### PR 監控 (pull_request)
 
-啟用 `github.events.pull_request` 後,PR 事件走專屬 playbook(設定見 `pr:` 區塊):
+啟用 `github.events.pull_request` 後,PR 事件走專屬 playbook。鏡像目標(GitLab 專案、
+git 網址、MR 目標分支)全部**依來源 repo 從 `projects.toml` 解析**,不在 config 裡設:
 
 - **`pr_review`(opened / reopened)**
   1. Codex 用 `gh pr view` / `gh pr diff` 取得 PR 內容與 diff。
   2. 做初步程式碼審查,並以 **comment** 模式張貼回 GitHub PR:
      `gh pr review <url> --comment --body ...`(不 approve、不 request-changes)。
   3. 把 PR 鏡像成內網 GitLab MR:以穩定分支名 `gh-pr-<number>` 把 head 內容
-     `git push` 到 `pr.gitlab_repo_url`,再用 `glab mr create` 在
-     `pr.gitlab_project` 建立/更新對應 MR(target = `pr.target_branch`)。
+     `git push` 到鏡像 git 網址,再用 `glab mr create` 在對應 GitLab 專案
+     建立/更新 MR(target 分支:拿 PR 的 base 分支查 `projects.toml` 的分支對照,
+     沒列到就同名)。
 - **`pr_merge_sync`(closed 且 merged)**
   - 把合併後的內容推到鏡像分支,並用 `glab mr merge` 合併對應的 GitLab MR。
     GitLab 端若有衝突不會強推,改回報 `ERROR`。
 
 > 分支名 `gh-pr-<number>` 是刻意固定的:review 時建立、merge 時據此找到同一個 MR。
-> Review 模式目前固定為 comment(在 `pr.review_mode`);gh / glab 各自用**自己的**登入
+> Review 模式固定為 comment(寫死在 AGENTS.md 安全規則);gh / glab 各自用**自己的**登入
 > 憑證(`gh auth login` / `glab auth login`),本服務不管理任何 token;git push 到 GitLab
 > 走 glab 的 git credential helper,憑證不進 URL、不落地。
 
@@ -98,7 +100,7 @@ issue 內文會標註「由自動化 triage agent 建立，評判僅供參考，
 ## 專案結構
 
 ```
-cmd/server/main.go        進入點:載入設定、啟動 worker pool 與 HTTP server、優雅關閉;-setup-webhook 註冊 webhook
+cmd/server/main.go        進入點 (urfave/cli):預設啟動 server;setup-webhook 子指令註冊 webhook
 internal/config           設定載入 (YAML + ${ENV} 展開)、驗證,以及 webhook secret 自動產生/持久化
 internal/webhook          用 gh 把 webhook 註冊到 repo(冪等),沿用自動管理的 secret
 internal/github/verify.go webhook 簽章驗證 (HMAC-SHA256)
@@ -133,10 +135,15 @@ scripts/setup-glab.sh     (選用) 手動驗證 glab 能連到內網 GitLab
   這段最容易寫錯、又牽涉憑證的部分封裝成一支經過測試的腳本(shallow clone、GitHub 端用 `gh`、
   GitLab push 用 glab 的 git credential helper,憑證**絕不進 URL 或落地**、trap 清理暫存)。
   prompt 直接叫 Codex 執行它,而非自己拼 git 指令,降低出錯與洩漏風險。
+- **`projects.toml`** — GitHub repo → 內網 GitLab 專案的對照表(可列多個),外加預設內網 host,
+  以及每個 repo 的**分支對照** `[projects.target_branch]`(GitHub base 分支 → GitLab MR 目標分支,
+  例如 `nightly = "nightly_github"`;沒列到的分支同名鏡像)。Codex 於執行期依「來源 repo」與
+  「PR base 分支」查表,解析出 `<PROJECT>` / `<MIRROR_PROJECT>` / mirror git URL / `<TARGET>`。
+  PR 鏡像的所有目標參數都出自這裡,不在 `config.yaml`。
 
-> skill 的參數(GitLab 專案、mirror URL、目標分支等)由 agent 依事件與 `pr:` 設定注入 prompt;
-> Codex 只需照 AGENTS.md 執行。要調整行為(例如改審查模式、換分支命名),改 AGENTS.md /
-> 腳本 / 設定即可,Go 端不用動。
+> 事件資料(來源 repo、PR 編號等)由 agent 注入 prompt;鏡像目標(GitLab 專案、mirror URL、
+> MR 目標分支)則由 Codex 依來源 repo 從 `projects.toml` 解析。要調整對照或目標分支,改
+> `projects.toml`;要改流程/安全規範,改 AGENTS.md / 腳本即可,Go 端不用動。
 
 ---
 
@@ -162,6 +169,9 @@ cp .env.example .env        # 填入 secret
 | 變數 | 用途 |
 |------|------|
 | `GITHUB_WEBHOOK_SECRET` | 驗證 webhook 簽章用的密鑰。**可留空**:留空時服務會自動生成並存在 `<codex.workdir>/.webhook-secret`,只有想指定特定值時才需要設 |
+| `PUBLIC_URL` | 本服務對外可達的 base URL(scheme + host,例如 `https://ci.example.com`),供 `setup-webhook` 當 webhook 目標(會自動接上 `server.path`) |
+| `CI_WEBHOOK_CONFIG` | (選用)config 檔路徑,等同 `--config`;設了就不必每次帶 |
+| `GITHUB_REPO` | (選用)`setup-webhook` 的目標 `owner/repo`,等同 `--repo` |
 | `GITLAB_HOST` | 內網 GitLab base URL，會注入 Codex 子行程,讓 glab 指向正確的 instance |
 | `OPENAI_API_KEY` | （或你的 codex 安裝所需的認證）供 Codex 推理 |
 
@@ -196,26 +206,33 @@ set -a; source .env; set +a
 # 讓 helper 上 PATH,並把 workdir 指到含 projects.toml 的目錄(本機可用 ./.reallsys)。
 export PATH="$PWD/codex/bin:$PATH"    # gh-pr-mirror.sh
 # 並在 config.yaml 設 codex.workdir: ./.reallsys(讓 Codex 讀得到 projects.toml)
-./bin/server -config config.yaml
+./bin/server                          # 預設讀 ./config.yaml
 ```
+
+> CLI 用 [urfave/cli](https://github.com/urfave/cli) 建構。`--config`(別名 `-c`)預設
+> `config.yaml`,也可用環境變數 `CI_WEBHOOK_CONFIG` 指定,所以平常不必每次都帶 `--config`。
+> 直接跑 `./bin/server` 啟動服務;`./bin/server setup-webhook ...` 註冊 webhook;
+> `./bin/server --help` 看全部指令。
 
 **註冊 webhook(建議用內建指令)**:服務會用已登入的 `gh` 把 webhook 建到 repo 上,
 自動帶上正確的 payload URL、content type、要訂閱的事件(即 `config.yaml` 裡 `enabled`
 的那些),以及上面那把自動管理的 secret。同一把 secret 兩邊自動對齊,不需手動填:
 
+webhook 的目標網址從 `server.public_url`(即 `${PUBLIC_URL}`)+ `server.path` 組出來,
+`--repo` 也吃 `GITHUB_REPO` 環境變數,所以設好環境變數後指令可以精簡到:
+
 ```bash
-./bin/server -config config.yaml \
-  -setup-webhook \
-  -repo qwe7002-ai/ci-webhook-codex-agent \
-  -webhook-url https://<你的服務>/webhook
+./bin/server setup-webhook --repo qwe7002-ai/ci-webhook-codex-agent
+# 若已設 GITHUB_REPO,連 --repo 都免:  ./bin/server setup-webhook
 ```
 
 - 冪等:同一個 URL 已有 webhook 就**就地更新**,不會重複建立。
 - 需要 `gh` 對該 repo 有 admin 權限(建立 webhook 的權限)。
 - 事後改了 `github.events`,再跑一次同樣指令即可把訂閱事件同步過去。
+- 想臨時指定別的網址,加 `--webhook-url https://.../webhook` 覆蓋 `public_url`。
 
 > 想手動在 GitHub UI 建也可以(repo → Settings → Webhooks):Payload URL 填
-> `https://<你的服務>/webhook`、Content type 選 `application/json`、Secret 填
+> `${PUBLIC_URL}` + `server.path`、Content type 選 `application/json`、Secret 填
 > `<codex.workdir>/.webhook-secret` 的內容(或你自訂的 `GITHUB_WEBHOOK_SECRET`)、
 > Events 勾選對應項目。
 

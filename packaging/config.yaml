@@ -5,15 +5,17 @@
 # unit), not in this file.
 
 server:
-  addr: ":8080"        # listen address
-  path: "/webhook"     # GitHub webhook target path
+  addr: ":8080"                # listen address
+  path: "/webhook"             # GitHub webhook target path
+  public_url: "${PUBLIC_URL}"  # externally reachable base URL, e.g. https://ci.example.com
+                               # used by the setup-webhook subcommand as the delivery target (path is appended)
 
 github:
   # Shared secret used to verify X-Hub-Signature-256. Optional: if empty (the
   # ${GITHUB_WEBHOOK_SECRET} env var is unset), the agent generates one on first
   # run and persists it at <codex.workdir>/.webhook-secret. Register the GitHub
   # webhook with the same secret via:
-  #   ci-webhook-codex-agent -setup-webhook -repo <owner/repo> -webhook-url <url>
+  #   ci-webhook-codex-agent setup-webhook --repo <owner/repo>
   webhook_secret: "${GITHUB_WEBHOOK_SECRET}"
 
   # gh/glab authenticate themselves: run `gh auth login` and `glab auth login`
@@ -80,12 +82,10 @@ gitlab:
                               # (points glab at the right instance; auth comes from `glab auth login`)
   project: "team/incidents"   # target project path where triage issues are opened
 
-# PR playbooks (used when pull_request is enabled).
-pr:
-  review_mode: "comment"                                   # gh review mode; comment = no approve/block
-  gitlab_project: "team/web-mirror"                        # GitLab project for mirrored MRs
-  gitlab_repo_url: "https://gitlab.internal.corp/team/web-mirror.git"  # git push target (no creds; glab's credential helper authenticates the push)
-  target_branch: "main"                                    # base branch for mirrored MRs / merge sync
+# PR playbooks: the mirror GitLab project, its git URL, and the MR target
+# branch are all resolved per-repo from projects.toml (installed at
+# /var/lib/ci-webhook-codex-agent/projects.toml, read by Codex at runtime), not
+# configured here.
 
 worker:
   concurrency: 2     # parallel Codex runs

@@ -41,6 +41,22 @@ type existingHook struct {
 	} `json:"config"`
 }
 
+// EndpointURL derives the webhook delivery URL from config: server.public_url
+// (e.g. https://ci.example.com) joined with server.path. If public_url already
+// ends with the path (a full endpoint URL was given), it is returned as-is.
+// Returns "" when public_url is unset.
+func EndpointURL(cfg *config.Config) string {
+	base := strings.TrimRight(cfg.Server.PublicURL, "/")
+	if base == "" {
+		return ""
+	}
+	path := cfg.Server.Path
+	if path == "" || strings.HasSuffix(base, path) {
+		return base
+	}
+	return base + path
+}
+
 // EnabledEvents returns the GitHub event names the config acts on, sorted, so
 // the webhook is subscribed to exactly what the agent will process.
 func EnabledEvents(cfg *config.Config) []string {
@@ -58,8 +74,11 @@ func EnabledEvents(cfg *config.Config) []string {
 // events to url, signed with the resolved webhook secret. It requires `gh` to
 // be installed and authenticated with admin access to repo.
 func Setup(ctx context.Context, cfg *config.Config, repo, url string, log *slog.Logger) error {
-	if repo == "" || url == "" {
-		return fmt.Errorf("both -repo (owner/repo) and -webhook-url are required")
+	if repo == "" {
+		return fmt.Errorf("repo (owner/repo) is required: set --repo or $GITHUB_REPO")
+	}
+	if url == "" {
+		return fmt.Errorf("no webhook URL: set server.public_url (via ${PUBLIC_URL}) or pass --webhook-url")
 	}
 	if cfg.GitHub.WebhookSecret == "" {
 		return fmt.Errorf("no webhook secret resolved") // resolveWebhookSecret should have set one

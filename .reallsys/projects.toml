@@ -1,7 +1,7 @@
 # GitHub repo -> 內網 GitLab 專案 對照表。
 #
-# Codex 會讀這個檔:依「當前事件的來源 GitHub repo」查出要鏡像/操作的內網 GitLab 專案。
-# 佈署時會複製到 Codex 的工作目錄,和 AGENTS.md 同一層:
+# Codex 會讀這個檔:依「當前事件的來源 GitHub repo」查出要鏡像/操作的內網 GitLab 專案,
+# 以及該鏡像 MR 的目標分支。佈署時會複製到 Codex 的工作目錄,和 AGENTS.md 同一層:
 #   Docker: /app/workspace/projects.toml
 #   deb:    /var/lib/ci-webhook-codex-agent/projects.toml
 #
@@ -9,13 +9,24 @@
 #   1. 找 github 等於來源 repo 的項目,用它的 gitlab 當內網專案路徑。
 #   2. 找不到就用 default_host + 相同的 <owner>/<repo>。
 #   3. 內網 git 網址一律 = <default_host>/<gitlab 路徑>.git
+#   4. 鏡像 MR 的目標分支:拿 GitHub PR 的 base 分支去查該項目的 [projects.target_branch]
+#      對照表;沒列到的分支就用同名(identity)。
 
 # 預設內網 GitLab host。
 default_host = "https://git.reall.us"
 
-# 個別對照:只有當內網路徑與 GitHub 的 <owner>/<repo> 不同時才需要列。
+# 個別對照:可列多個 [[projects]]。只有當內網路徑與 GitHub 的 <owner>/<repo> 不同、
+# 或有分支需要改名鏡像時,才需要列。
 #   github = "<owner>/<repo>"   GitHub 來源 repo
 #   gitlab = "<group>/<proj>"   對應的內網 GitLab 專案路徑
 [[projects]]
 github = "telegram-sms/telegram-sms"
 gitlab = "telegram-sms/telegram-sms"
+
+[[projects]]
+github = "example/web"
+gitlab = "team/web-mirror"
+# 分支對照(GitHub base 分支 -> GitLab MR 目標分支)。只列**不同名**的;
+# 沒列到的分支預設同名鏡像(例如 main -> main)。
+[projects.target_branch]
+nightly = "nightly_github"
