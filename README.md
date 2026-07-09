@@ -98,7 +98,7 @@ issue 內文會標註「由自動化 triage agent 建立，評判僅供參考，
 ## 專案結構
 
 ```
-cmd/server/main.go        進入點:載入設定、啟動 worker pool 與 HTTP server、優雅關閉;-setup-webhook 註冊 webhook
+cmd/server/main.go        進入點 (urfave/cli):預設啟動 server;setup-webhook 子指令註冊 webhook
 internal/config           設定載入 (YAML + ${ENV} 展開)、驗證,以及 webhook secret 自動產生/持久化
 internal/webhook          用 gh 把 webhook 註冊到 repo(冪等),沿用自動管理的 secret
 internal/github/verify.go webhook 簽章驗證 (HMAC-SHA256)
@@ -162,7 +162,9 @@ cp .env.example .env        # 填入 secret
 | 變數 | 用途 |
 |------|------|
 | `GITHUB_WEBHOOK_SECRET` | 驗證 webhook 簽章用的密鑰。**可留空**:留空時服務會自動生成並存在 `<codex.workdir>/.webhook-secret`,只有想指定特定值時才需要設 |
-| `PUBLIC_URL` | 本服務對外可達的 base URL(scheme + host,例如 `https://ci.example.com`),供 `-setup-webhook` 當 webhook 目標(會自動接上 `server.path`) |
+| `PUBLIC_URL` | 本服務對外可達的 base URL(scheme + host,例如 `https://ci.example.com`),供 `setup-webhook` 當 webhook 目標(會自動接上 `server.path`) |
+| `CI_WEBHOOK_CONFIG` | (選用)config 檔路徑,等同 `--config`;設了就不必每次帶 |
+| `GITHUB_REPO` | (選用)`setup-webhook` 的目標 `owner/repo`,等同 `--repo` |
 | `GITLAB_HOST` | 內網 GitLab base URL，會注入 Codex 子行程,讓 glab 指向正確的 instance |
 | `OPENAI_API_KEY` | （或你的 codex 安裝所需的認證）供 Codex 推理 |
 
@@ -197,24 +199,30 @@ set -a; source .env; set +a
 # 讓 helper 上 PATH,並把 workdir 指到含 projects.toml 的目錄(本機可用 ./.reallsys)。
 export PATH="$PWD/codex/bin:$PATH"    # gh-pr-mirror.sh
 # 並在 config.yaml 設 codex.workdir: ./.reallsys(讓 Codex 讀得到 projects.toml)
-./bin/server -config config.yaml
+./bin/server                          # 預設讀 ./config.yaml
 ```
+
+> CLI 用 [urfave/cli](https://github.com/urfave/cli) 建構。`--config`(別名 `-c`)預設
+> `config.yaml`,也可用環境變數 `CI_WEBHOOK_CONFIG` 指定,所以平常不必每次都帶 `--config`。
+> 直接跑 `./bin/server` 啟動服務;`./bin/server setup-webhook ...` 註冊 webhook;
+> `./bin/server --help` 看全部指令。
 
 **註冊 webhook(建議用內建指令)**:服務會用已登入的 `gh` 把 webhook 建到 repo 上,
 自動帶上正確的 payload URL、content type、要訂閱的事件(即 `config.yaml` 裡 `enabled`
 的那些),以及上面那把自動管理的 secret。同一把 secret 兩邊自動對齊,不需手動填:
 
 webhook 的目標網址從 `server.public_url`(即 `${PUBLIC_URL}`)+ `server.path` 組出來,
-所以設好環境變數後指令只需指定 repo:
+`--repo` 也吃 `GITHUB_REPO` 環境變數,所以設好環境變數後指令可以精簡到:
 
 ```bash
-./bin/server -config config.yaml -setup-webhook -repo qwe7002-ai/ci-webhook-codex-agent
+./bin/server setup-webhook --repo qwe7002-ai/ci-webhook-codex-agent
+# 若已設 GITHUB_REPO,連 --repo 都免:  ./bin/server setup-webhook
 ```
 
 - 冪等:同一個 URL 已有 webhook 就**就地更新**,不會重複建立。
 - 需要 `gh` 對該 repo 有 admin 權限(建立 webhook 的權限)。
 - 事後改了 `github.events`,再跑一次同樣指令即可把訂閱事件同步過去。
-- 想臨時指定別的網址,加 `-webhook-url https://.../webhook` 覆蓋 `public_url`。
+- 想臨時指定別的網址,加 `--webhook-url https://.../webhook` 覆蓋 `public_url`。
 
 > 想手動在 GitHub UI 建也可以(repo → Settings → Webhooks):Payload URL 填
 > `${PUBLIC_URL}` + `server.path`、Content type 選 `application/json`、Secret 填

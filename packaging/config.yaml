@@ -8,14 +8,14 @@ server:
   addr: ":8080"                # listen address
   path: "/webhook"             # GitHub webhook target path
   public_url: "${PUBLIC_URL}"  # externally reachable base URL, e.g. https://ci.example.com
-                               # used by -setup-webhook as the delivery target (path is appended)
+                               # used by the setup-webhook subcommand as the delivery target (path is appended)
 
 github:
   # Shared secret used to verify X-Hub-Signature-256. Optional: if empty (the
   # ${GITHUB_WEBHOOK_SECRET} env var is unset), the agent generates one on first
   # run and persists it at <codex.workdir>/.webhook-secret. Register the GitHub
   # webhook with the same secret via:
-  #   ci-webhook-codex-agent -setup-webhook -repo <owner/repo> -webhook-url <url>
+  #   ci-webhook-codex-agent setup-webhook --repo <owner/repo>
   webhook_secret: "${GITHUB_WEBHOOK_SECRET}"
 
   # gh/glab authenticate themselves: run `gh auth login` and `glab auth login`

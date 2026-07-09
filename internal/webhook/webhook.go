@@ -75,10 +75,10 @@ func EnabledEvents(cfg *config.Config) []string {
 // be installed and authenticated with admin access to repo.
 func Setup(ctx context.Context, cfg *config.Config, repo, url string, log *slog.Logger) error {
 	if repo == "" {
-		return fmt.Errorf("-repo (owner/repo) is required")
+		return fmt.Errorf("repo (owner/repo) is required: set --repo or $GITHUB_REPO")
 	}
 	if url == "" {
-		return fmt.Errorf("no webhook URL: set server.public_url (via ${PUBLIC_URL}) or pass -webhook-url")
+		return fmt.Errorf("no webhook URL: set server.public_url (via ${PUBLIC_URL}) or pass --webhook-url")
 	}
 	if cfg.GitHub.WebhookSecret == "" {
 		return fmt.Errorf("no webhook secret resolved") // resolveWebhookSecret should have set one

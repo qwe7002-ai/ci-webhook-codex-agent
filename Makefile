@@ -7,7 +7,7 @@ build:
 	go build -o bin/server ./cmd/server
 
 run: build
-	./bin/server -config config.yaml
+	./bin/server --config config.yaml
 
 test:
 	go test ./...

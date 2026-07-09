@@ -53,8 +53,8 @@ Next steps:
   5. Register the GitHub webhook (uses gh; reuses the auto-generated secret;
      the URL comes from PUBLIC_URL + server.path):
        sudo -u ci-webhook-codex-agent -H ci-webhook-codex-agent \
-         -config /etc/ci-webhook-codex-agent/config.yaml \
-         -setup-webhook -repo <owner/repo>
+         --config /etc/ci-webhook-codex-agent/config.yaml \
+         setup-webhook --repo <owner/repo>
   6. Start it:
        systemctl start ci-webhook-codex-agent
        systemctl status ci-webhook-codex-agent
